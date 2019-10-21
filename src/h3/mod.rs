@@ -156,7 +156,7 @@
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
-//!         }
+//!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -474,6 +474,13 @@ pub enum Event {
 
     /// Stream was closed,
     Finished,
+}
+
+#[cfg(feature = "h3-dgram")]
+/// An HTTP/3 DATAGRAM event.
+pub enum DatagramEvent {
+    /// DATAGRAM was received
+    Received(Vec<u8>),
 }
 
 struct ConnectionSettings {
@@ -859,6 +866,38 @@ impl Connection {
         Ok(written)
     }
 
+    /// Sends an HTTP/3 DATAGRAM with the specified flow ID, as defined in
+    /// draft-schinazi-quic-h3-datagram-03
+    #[cfg(feature = "h3-dgram")]
+    pub fn dgram_send(
+        &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
+    ) -> Result<()> {
+        let len = octets::varint_len(flow_id) + buf.len();
+        let mut d = vec![0; len as usize];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        b.put_varint(flow_id)?;
+        b.put_bytes(buf)?;
+
+        conn.dgram_send(&d)?;
+
+        Ok(())
+    }
+
+    /// Gets the size of the largest Datagram frame payload that can be sent,
+    /// given the maximum size supported by the peer, the current maximum
+    /// packet length and the space required by the HTTP/3 and QUIC overheads.
+    #[cfg(feature = "h3-dgram")]
+    pub fn dgram_max_writable_len(
+        &self, conn: &super::Connection, flow_id: u64,
+    ) -> Option<usize> {
+        let flow_id_len = octets::varint_len(flow_id);
+        match conn.dgram_max_writable_len() {
+            None => None,
+            Some(len) => len.checked_sub(flow_id_len),
+        }
+    }
+
     /// Reads request or response body data into the provided buffer.
     ///
     /// Applications should call this method whenever the [`poll()`] method
@@ -949,6 +988,34 @@ impl Connection {
             if let Some(ev) = ev {
                 return Ok(ev);
             }
+        }
+
+        Err(Error::Done)
+    }
+
+    #[cfg(feature = "h3-dgram")]
+    /// Processes HTTP/3 DATAGRAMs received from the peer.
+    ///
+    /// On success it returns a [`DatagramEvent`] as well as the event's flow
+    /// ID. On error the connection will be closed by calling [`close()`] with
+    /// the appropriate error code.
+    ///
+    /// [`DatagramEvent`]: enum.DatagramEvent.html
+    /// [`close()`]: ../struct.Connection.html#method.close
+    pub fn poll_dgram(
+        &mut self, conn: &mut super::Connection, buf: &mut [u8],
+    ) -> Result<(u64, DatagramEvent)> {
+        // Process DATAGRAMs
+        let ev = match self.process_dgram(conn, buf) {
+            Ok(v) => Some(v),
+
+            Err(Error::Done) => None,
+
+            Err(e) => return Err(e),
+        };
+
+        if let Some(ev) = ev {
+            return Ok(ev);
         }
 
         Err(Error::Done)
@@ -1371,6 +1438,18 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    /// Process DATAGRAMs
+    #[cfg(feature = "h3-dgram")]
+    fn process_dgram(
+        &mut self, conn: &mut super::Connection, buf: &mut [u8],
+    ) -> Result<(u64, DatagramEvent)> {
+        conn.dgram_recv(buf)?;
+        let mut b = octets::Octets::with_slice(buf);
+        let flow_id = b.get_varint()?;
+        let data = b.get_bytes(b.len() - b.off())?;
+        Ok((flow_id, DatagramEvent::Received(data.to_vec())))
     }
 
     fn process_frame(
