@@ -851,6 +851,9 @@ pub struct Connection {
 
     /// Whether to send GREASE.
     grease: bool,
+    
+    /// Datagram queue.
+    dgram_queue: dgram::DatagramQueue,
 
     /// Qlog streaming output.
     #[cfg(feature = "qlog")]
@@ -1152,6 +1155,8 @@ impl Connection {
             closed: false,
 
             grease: config.grease,
+
+            dgram_queue: dgram::DatagramQueue::new(),
 
             #[cfg(feature = "qlog")]
             qlog_streamer: None,
@@ -2152,6 +2157,32 @@ impl Connection {
             }
         }
 
+        // Create DATAGRAM frame.
+        if pkt_type == packet::Type::Short && left > frame::MAX_DGRAM_OVERHEAD && !is_closing {
+            while let Some(len) = self.dgram_queue.peek_writable() {
+                // Make sure we can fit the data in the packet.is_closing
+                if left > frame::MAX_DGRAM_OVERHEAD + len {
+                    let data = match self.dgram_queue.pop_writable() {
+                        Some(v) => v,
+
+                        None => continue,
+                    };
+
+                    let frame = frame::Frame::Datagram {data};
+
+                    payload_len += frame.wire_len();
+                    left -= frame.wire_len();
+
+                    frames.push(frame);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+
+                    break;
+                }
+            }
+        }
+
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
             left > frame::MAX_STREAM_OVERHEAD &&
@@ -2768,6 +2799,64 @@ impl Connection {
         self.streams.writable()
     }
 
+    /// Attempts to read a stored Datagram.
+    ///
+    /// On success the Datagram's data is returned, or [`Done`] if there is no data to read.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// while let Ok((data)) = conn.dgram_recv() {
+    ///     println!("Got {} bytes of Datagram", data.len());
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_recv(
+        &mut self,
+    ) -> Result<Vec<u8>> {
+
+        let data = self.dgram_queue.pop_readable()?.to_vec();
+
+        Ok(data)
+    }
+
+    /// Send data in a Datagram frame.
+    ///
+    /// [`Done`] is returned if no data was written.
+    ///
+    /// Note that there is no flow control of Datagram frames, so in order to avoid
+    /// buffering an infinite amount of frames we apply an internal limit.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// conn.dgram_send(b"hello")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_send(
+        &mut self, buf: &[u8],
+    ) -> Result<()> {
+        let data = stream::RangeBuf::from(buf, 0, true);
+
+        self.dgram_queue.push_writable(data)?;
+
+        Ok(())
+    }
+
     /// Returns the amount of time until the next timeout event.
     ///
     /// Once the given duration has elapsed, the [`on_timeout()`] method should
@@ -3344,6 +3433,10 @@ impl Connection {
                 // Once the handshake is confirmed, we can drop Handshake keys.
                 self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
             },
+
+            frame::Frame::Datagram { data } => {
+                self.dgram_queue.push_readable(stream::RangeBuf::from(data.as_ref(), 0, true))?;
+            },
         }
 
         Ok(())
@@ -3502,6 +3595,7 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
+    pub max_datagram_frame_size: u64,
 }
 
 impl Default for TransportParams {
@@ -3521,6 +3615,7 @@ impl Default for TransportParams {
             max_ack_delay: 25,
             disable_active_migration: false,
             active_conn_id_limit: 0,
+            max_datagram_frame_size: 0,
         }
     }
 }
@@ -3655,10 +3750,16 @@ impl TransportParams {
                     tp.active_conn_id_limit = val.get_varint()?;
                 },
 
+                0x0020 => {
+                    tp.max_datagram_frame_size = val.get_varint()?;
+                },
+
                 // Ignore unknown parameters.
                 _ => (),
             }
         }
+
+
 
         Ok(tp)
     }
@@ -3823,6 +3924,12 @@ impl TransportParams {
                     version,
                 )?;
                 b.put_varint(tp.active_conn_id_limit)?;
+            }
+
+            if tp.max_datagram_frame_size != 0 {
+                b.put_u16(0x0020)?;
+                b.put_u16(octets::varint_len(tp.max_datagram_frame_size) as u16)?;
+                b.put_varint(tp.max_datagram_frame_size)?;
             }
 
             b.off()
@@ -4201,84 +4308,13 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            max_datagram_frame_size: 32,
         };
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params)
-                .unwrap();
-        assert_eq!(raw_params.len(), 73);
-
-        let new_tp =
-            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, false)
-                .unwrap();
-
-        assert_eq!(new_tp, tp);
-
-        // Client encodes, server decodes.
-        let tp = TransportParams {
-            original_connection_id: None,
-            max_idle_timeout: 30,
-            stateless_reset_token: None,
-            max_packet_size: 23_421,
-            initial_max_data: 424_645_563,
-            initial_max_stream_data_bidi_local: 154_323_123,
-            initial_max_stream_data_bidi_remote: 6_587_456,
-            initial_max_stream_data_uni: 2_461_234,
-            initial_max_streams_bidi: 12_231,
-            initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 20,
-            max_ack_delay: 2_u64.pow(14) - 1,
-            disable_active_migration: true,
-            active_conn_id_limit: 8,
-        };
-
-        let mut raw_params = [42; 256];
-        let mut raw_params = TransportParams::encode(
-            &tp,
-            PROTOCOL_VERSION,
-            false,
-            &mut raw_params,
-        )
-        .unwrap();
-        assert_eq!(raw_params.len(), 55);
-
-        let new_tp =
-            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, true)
-                .unwrap();
-
-        assert_eq!(new_tp, tp);
-    }
-
-    #[test]
-    fn transport_params_old() {
-        // Server encodes, client decodes.
-        let tp = TransportParams {
-            original_connection_id: None,
-            max_idle_timeout: 30,
-            stateless_reset_token: Some(vec![0xba; 16]),
-            max_packet_size: 23_421,
-            initial_max_data: 424_645_563,
-            initial_max_stream_data_bidi_local: 154_323_123,
-            initial_max_stream_data_bidi_remote: 6_587_456,
-            initial_max_stream_data_uni: 2_461_234,
-            initial_max_streams_bidi: 12_231,
-            initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 20,
-            max_ack_delay: 2_u64.pow(14) - 1,
-            disable_active_migration: true,
-            active_conn_id_limit: 8,
-        };
-
-        let mut raw_params = [42; 256];
-        let mut raw_params = TransportParams::encode(
-            &tp,
-            PROTOCOL_VERSION_DRAFT25,
-            true,
-            &mut raw_params,
-        )
-        .unwrap();
-        assert_eq!(raw_params.len(), 101);
+            TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params).unwrap();
+        assert_eq!(raw_params.len(), 106);
 
         let new_tp = TransportParams::decode(
             &mut raw_params,
@@ -4305,6 +4341,7 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            max_datagram_frame_size: 32,
         };
 
         let mut raw_params = [42; 256];
@@ -6022,6 +6059,7 @@ pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::stream::StreamIter;
 
 mod crypto;
+mod dgram;
 mod ffi;
 mod frame;
 pub mod h3;
