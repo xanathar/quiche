@@ -691,6 +691,11 @@ impl Config {
     /// The default value is `quiche::CongestionControlAlgorithm::Reno`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    /// Sets the `max_datagram_frame_size` transport parameter.
+    ///
+    /// The default is `0`.
+    pub fn set_max_datagram_frame_size(&mut self, v: u64) {
+        self.local_transport_params.max_datagram_frame_size = v;
     }
 }
 
@@ -821,7 +826,6 @@ pub struct Connection {
 
     /// Datagram queue.
     dgram_queue: dgram::DatagramQueue,
-
 }
 
 /// Creates a new server-side connection.
@@ -1958,9 +1962,12 @@ impl Connection {
         }
 
         // Create DATAGRAM frame.
-        if pkt_type == packet::Type::Short && left > frame::MAX_DGRAM_OVERHEAD && !is_closing {
+        if pkt_type == packet::Type::Short &&
+            left > frame::MAX_DGRAM_OVERHEAD &&
+            !is_closing
+        {
             while let Some(len) = self.dgram_queue.peek_writable() {
-                // Make sure we can fit the data in the packet.is_closing
+                // Make sure we can fit the data in the packet.
                 if left > frame::MAX_DGRAM_OVERHEAD + len {
                     let data = match self.dgram_queue.pop_writable() {
                         Some(v) => v,
@@ -1968,7 +1975,7 @@ impl Connection {
                         None => continue,
                     };
 
-                    let frame = frame::Frame::Datagram {data};
+                    let frame = frame::Frame::Datagram { data };
 
                     payload_len += frame.wire_len();
                     left -= frame.wire_len();
@@ -2521,7 +2528,8 @@ impl Connection {
 
     /// Attempts to read a stored Datagram.
     ///
-    /// On success the Datagram's data is returned, or [`Done`] if there is no data to read.
+    /// On success the Datagram's data is returned, or [`Done`] if there is no
+    /// data to read.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     ///
@@ -2551,8 +2559,9 @@ impl Connection {
     ///
     /// [`Done`] is returned if no data was written.
     ///
-    /// Note that there is no flow control of Datagram frames, so in order to avoid
-    /// buffering an infinite amount of frames we apply an internal limit.
+    /// Note that there is no flow control of Datagram frames, so in order to
+    /// avoid buffering an infinite amount of frames we apply an internal
+    /// limit.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     ///
@@ -2567,9 +2576,7 @@ impl Connection {
     /// conn.dgram_send(b"hello")?;
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn dgram_send(
-        &mut self, buf: &[u8],
-    ) -> Result<()> {
+    pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
         let data = stream::RangeBuf::from(buf, 0, true);
 
         self.dgram_queue.push_writable(data)?;
@@ -3134,7 +3141,11 @@ impl Connection {
             },
 
             frame::Frame::Datagram { data } => {
-                self.dgram_queue.push_readable(stream::RangeBuf::from(data.as_ref(), 0, true))?;
+                self.dgram_queue.push_readable(stream::RangeBuf::from(
+                    data.as_ref(),
+                    0,
+                    true,
+                ))?;
             },
         }
 
@@ -3455,8 +3466,6 @@ impl TransportParams {
                 _ => (),
             }
         }
-
-
 
         Ok(tp)
     }

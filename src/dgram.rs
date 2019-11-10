@@ -41,8 +41,11 @@ pub struct DatagramQueue {
 }
 
 impl DatagramQueue {
-    pub fn new () -> Self {
-        DatagramQueue{readable: VecDeque::new(), writable: VecDeque::new()}
+    pub fn new() -> Self {
+        DatagramQueue {
+            readable: VecDeque::new(),
+            writable: VecDeque::new(),
+        }
     }
 
     pub fn push_readable(&mut self, data: stream::RangeBuf) -> Result<()> {
@@ -56,11 +59,10 @@ impl DatagramQueue {
     }
 
     pub fn pop_readable(&mut self) -> Result<stream::RangeBuf> {
-
         match self.readable.pop_front() {
             Some(v) => Ok(v),
 
-            None => Err(Error::Done)
+            None => Err(Error::Done),
         }
     }
 
@@ -82,12 +84,10 @@ impl DatagramQueue {
     pub fn pop_writable(&mut self) -> Option<stream::RangeBuf> {
         self.writable.pop_front()
 
-        /*match self.writable.pop_front() {
-            Some(v) => Ok(v),
-
-            None => Err(Error::Done)
-        }*/
+        // match self.writable.pop_front() {
+        // Some(v) => Ok(v),
+        //
+        // None => Err(Error::Done)
+        // }
     }
-
-
 }
