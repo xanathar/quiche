@@ -47,25 +47,17 @@ Options:
   --name <str>                Name of the server [default: quic.tech]
   --max-data BYTES            Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
-  --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
-  --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 0].
+  --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 3].
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
   -h --help                   Show this screen.
 ";
 
-struct PartialResponse {
-    body: Vec<u8>,
-
-    written: usize,
-}
-
 struct Client {
     conn: Box<quiche::Connection>,
 
     http3_conn: Option<quiche::h3::Connection>,
-
-    partial_responses: HashMap<u64, PartialResponse>,
 }
 
 type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
@@ -133,6 +125,7 @@ fn main() {
     config.set_initial_max_streams_bidi(max_streams_bidi);
     config.set_initial_max_streams_uni(max_streams_uni);
     config.set_disable_active_migration(true);
+    config.set_max_datagram_frame_size(500);
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
@@ -299,7 +292,6 @@ fn main() {
                 let client = Client {
                     conn,
                     http3_conn: None,
-                    partial_responses: HashMap::new(),
                 };
 
                 clients.insert(scid.to_vec(), (src, client));
@@ -351,54 +343,30 @@ fn main() {
             }
 
             if client.http3_conn.is_some() {
-
-                match client.conn.dgram_recv() {
-                    Ok(v) => {
-                        info!("Received DATAGRAM data {:?}", v);
-                    },
-
-                    Err(quiche::Error::Done) => {
-                        break;
-                    },
-
-                    Err(e) => {
-                            error!(
-                                "{} DATAGRAM error {:?}",
-                                client.conn.trace_id(),
-                                e
-                            );
-
-                            break 'read;
-                        },
-                }
-                // Handle writable streams.
-                /*for stream_id in client.conn.writable() {
-                    handle_writable(client, stream_id);
-                }*/
-
                 // Process HTTP/3 events.
-                /*loop {
+                loop {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
                     match http3_conn.poll(client.conn.as_mut()) {
-                        Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
-                            handle_request(
-                                client,
-                                stream_id,
-                                &headers,
-                                args.get_str("--root"),
-                            );
-                        },
-
-                        Ok((stream_id, quiche::h3::Event::Data)) => {
+                        Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
                             info!(
-                                "{} got data on stream id {}",
-                                client.conn.trace_id(),
-                                stream_id
+                                "Received DATAGRAM flow_id={} dat= {:?}",
+                                flow_id, data
                             );
-                        },
 
-                        Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+                            match http3_conn.dgram_send(
+                                &mut client.conn,
+                                flow_id,
+                                &data,
+                            ) {
+                                Ok(v) => v,
+
+                                Err(e) => {
+                                    error!("failed to send dgram {:?}", e);
+                                    break;
+                                },
+                            }
+                        },
 
                         Err(quiche::h3::Error::Done) => {
                             break;
@@ -413,8 +381,10 @@ fn main() {
 
                             break 'read;
                         },
+
+                        _ => unreachable!(),
                     }
-                }*/
+                }
             }
         }
 
@@ -526,132 +496,6 @@ fn validate_token<'a>(
     let token = &token[addr.len()..];
 
     Some(&token[..])
-}
-
-/// Handles incoming HTTP/3 requests.
-fn handle_request(
-    client: &mut Client, stream_id: u64, headers: &[quiche::h3::Header],
-    root: &str,
-) {
-    let conn = &mut client.conn;
-    let http3_conn = &mut client.http3_conn.as_mut().unwrap();
-
-    info!(
-        "{} got request {:?} on stream id {}",
-        conn.trace_id(),
-        headers,
-        stream_id
-    );
-
-    // We decide the response based on headers alone, so stop reading the
-    // request stream so that any body is ignored and pointless Data events
-    // are not generated.
-    conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
-        .unwrap();
-
-    let (headers, body) = build_response(root, headers);
-
-    if let Err(e) = http3_conn.send_response(conn, stream_id, &headers, false) {
-        error!("{} stream send failed {:?}", conn.trace_id(), e);
-    }
-
-    let written = match http3_conn.send_body(conn, stream_id, &body, true) {
-        Ok(v) => v,
-
-        Err(quiche::h3::Error::Done) => 0,
-
-        Err(e) => {
-            error!("{} stream send failed {:?}", conn.trace_id(), e);
-            return;
-        },
-    };
-
-    if written < body.len() {
-        let response = PartialResponse { body, written };
-        client.partial_responses.insert(stream_id, response);
-    }
-}
-
-/// Builds an HTTP/3 response given a request.
-fn build_response(
-    root: &str, request: &[quiche::h3::Header],
-) -> (Vec<quiche::h3::Header>, Vec<u8>) {
-    let mut file_path = std::path::PathBuf::from(root);
-    let mut path = std::path::Path::new("");
-    let mut method = "";
-
-    // Look for the request's path and method.
-    for hdr in request {
-        match hdr.name() {
-            ":path" => {
-                path = std::path::Path::new(hdr.value());
-            },
-
-            ":method" => {
-                method = hdr.value();
-            },
-
-            _ => (),
-        }
-    }
-
-    let (status, body) = match method {
-        "GET" => {
-            for c in path.components() {
-                if let std::path::Component::Normal(v) = c {
-                    file_path.push(v)
-                }
-            }
-
-            match std::fs::read(file_path.as_path()) {
-                Ok(data) => (200, data),
-
-                Err(_) => (404, b"Not Found!".to_vec()),
-            }
-        },
-
-        _ => (405, Vec::new()),
-    };
-
-    let headers = vec![
-        quiche::h3::Header::new(":status", &status.to_string()),
-        quiche::h3::Header::new("server", "quiche"),
-        quiche::h3::Header::new("content-length", &body.len().to_string()),
-    ];
-
-    (headers, body)
-}
-
-/// Handles newly writable streams.
-fn handle_writable(client: &mut Client, stream_id: u64) {
-    let conn = &mut client.conn;
-    let http3_conn = &mut client.http3_conn.as_mut().unwrap();
-
-    debug!("{} stream {} is writable", conn.trace_id(), stream_id);
-
-    if !client.partial_responses.contains_key(&stream_id) {
-        return;
-    }
-
-    let resp = client.partial_responses.get_mut(&stream_id).unwrap();
-    let body = &resp.body[resp.written..];
-
-    let written = match http3_conn.send_body(conn, stream_id, body, true) {
-        Ok(v) => v,
-
-        Err(quiche::h3::Error::Done) => 0,
-
-        Err(e) => {
-            error!("{} stream send failed {:?}", conn.trace_id(), e);
-            return;
-        },
-    };
-
-    resp.written += written;
-
-    if resp.written == resp.body.len() {
-        client.partial_responses.remove(&stream_id);
-    }
 }
 
 fn hex_dump(buf: &[u8]) -> String {

@@ -362,6 +362,8 @@ fn main() {
 
                             break;
                         },
+
+                        _ => unreachable!(),
                     }
                 }
             }

@@ -122,9 +122,10 @@ fn main() {
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_stream_data_uni(max_stream_data);
-    config.set_initial_max_streams_bidi(100);
-    config.set_initial_max_streams_uni(100);
+    config.set_initial_max_streams_bidi(0);
+    config.set_initial_max_streams_uni(3);
     config.set_disable_active_migration(true);
+    config.set_max_datagram_frame_size(500);
 
     let mut http3_conn = None;
 
@@ -168,9 +169,6 @@ fn main() {
     debug!("written {}", write);
 
     let h3_config = quiche::h3::Config::new().unwrap();
-
-    // Prepare request.
-    let mut path = String::from(url.path());
 
     let mut dgrams_sent = 0;
 
@@ -255,12 +253,11 @@ fn main() {
             for _ in dgrams_sent..dgrams_count {
                 info!("sending DATAGRAM data {:?}", dgram_data);
 
-
-                match conn.dgram_send(dgram_data.as_bytes()) {
+                match h3_conn.dgram_send(&mut conn, 0, dgram_data.as_bytes()) {
                     Ok(v) => v,
 
                     Err(e) => {
-                        error!("failed to send request {:?}", e);
+                        error!("failed to send dgram {:?}", e);
                         break;
                     },
                 }
@@ -272,45 +269,27 @@ fn main() {
         }
 
         if let Some(http3_conn) = &mut http3_conn {
-            // Process dgrams
-            /*loop {
+            // Process HTTP/3 events.
+            loop {
                 match http3_conn.poll(&mut conn) {
-                    Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
+                    Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
                         info!(
-                            "got response headers {:?} on stream id {}",
-                            headers, stream_id
+                            "Received DATAGRAM flow_id={} dat= {:?}",
+                            flow_id, data
                         );
-                    },
-
-                    Ok((stream_id, quiche::h3::Event::Data)) => {
-                        if let Ok(read) =
-                            http3_conn.recv_body(&mut conn, stream_id, &mut buf)
-                        {
-                            debug!(
-                                "got {} bytes of response data on stream {}",
-                                read, stream_id
-                            );
-
-                            print!("{}", unsafe {
-                                std::str::from_utf8_unchecked(&buf[..read])
-                            });
-                        }
-                    },
-
-                    Ok((_stream_id, quiche::h3::Event::Finished)) => {
-                        reqs_complete += 1;
+                        dgrams_complete += 1;
 
                         debug!(
-                            "{}/{} responses received",
-                            reqs_complete, reqs_count
+                            "{}/{} dgrams received",
+                            dgrams_complete, dgrams_count
                         );
 
-                        if reqs_complete == reqs_count {
+                        if dgrams_complete == dgrams_count {
                             info!(
-                                "{}/{} response(s) received in {:?}, closing...",
-                                reqs_complete,
-                                reqs_count,
-                                req_start.elapsed()
+                                "{}/{} dgrams(s) received in {:?}, closing...",
+                                dgrams_complete,
+                                dgrams_count,
+                                dgram_start.elapsed()
                             );
 
                             match conn.close(true, 0x00, b"kthxbye") {
@@ -333,8 +312,10 @@ fn main() {
 
                         break;
                     },
+
+                    _ => unreachable!(),
                 }
-            }*/
+            }
         }
 
         // Generate outgoing QUIC packets and send them on the UDP socket, until

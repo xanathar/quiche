@@ -471,6 +471,9 @@ pub enum Event {
 
     /// Stream was closed,
     Finished,
+
+    /// Datagram was received
+    Datagram(Vec<u8>),
 }
 
 struct ConnectionSettings {
@@ -782,6 +785,33 @@ impl Connection {
         Ok(written)
     }
 
+    /// Sends an HTTP/3 Datagram with the specified flow ID, as defined in
+    /// https://tools.ietf.org/html/draft-schinazi-quic-h3-datagram-02
+    pub fn dgram_send(
+        &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
+    ) -> Result<()> {
+        let len = octets::varint_len(flow_id) + buf.len();
+        let dgram_len = super::frame::MAX_DGRAM_OVERHEAD + len;
+
+        if dgram_len > conn.peer_transport_params.max_datagram_frame_size as usize
+        {
+            return Err(Error::BufferTooShort);
+        }
+
+        let mut d = vec![0; len as usize];
+
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        b.put_varint(flow_id)?;
+        b.put_bytes(buf)?;
+
+        let data = super::stream::RangeBuf::from(&d, 0, true);
+
+        conn.dgram_queue.push_writable(data)?;
+
+        Ok(())
+    }
+
     /// Reads request or response body data into the provided buffer.
     ///
     /// Applications should call this method whenever the [`poll()`] method
@@ -872,6 +902,19 @@ impl Connection {
             if let Some(ev) = ev {
                 return Ok(ev);
             }
+        }
+
+        // Process Datagrams
+        let ev = match self.process_dgram(conn) {
+            Ok(v) => Some(v),
+
+            Err(Error::Done) => None,
+
+            Err(e) => return Err(e),
+        };
+
+        if let Some(ev) = ev {
+            return Ok(ev);
         }
 
         Err(Error::Done)
@@ -1277,6 +1320,17 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    /// Process Datagrams
+    pub fn process_dgram(
+        &mut self, conn: &mut super::Connection,
+    ) -> Result<(u64, Event)> {
+        let mut v = conn.dgram_recv()?;
+        let mut b = octets::Octets::with_slice(&mut v);
+        let flow_id = b.get_varint()?;
+        let data = b.get_bytes(b.len() - b.off())?;
+        return Ok((flow_id, Event::Datagram(data.to_vec())));
     }
 
     fn process_frame(

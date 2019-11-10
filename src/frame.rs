@@ -998,11 +998,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Datagram { data } => {
-                write!(
-                    f,
-                    "DATAGRAM len={}",
-                    data.len(),
-                )?;
+                write!(f, "DATAGRAM len={}", data.len(),)?;
             },
         }
 
@@ -1795,7 +1791,7 @@ mod tests {
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
