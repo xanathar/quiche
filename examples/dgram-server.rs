@@ -35,6 +35,8 @@ use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+const SIDUCK_ALPN: &[u8] = b"\x06siduck";
+
 const USAGE: &str = "Usage:
   http3-server [options]
   http3-server -h | --help
@@ -51,6 +53,7 @@ Options:
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 3].
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
+  -a --alpn-proto ALPN        Application protocol on which to send DATAGRAM [default: h3]
   -h --help                   Show this screen.
 ";
 
@@ -86,6 +89,15 @@ fn main() {
     let max_streams_uni = args.get_str("--max-streams-uni");
     let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
 
+    let alpn_proto = args.get_str("--alpn-proto");
+    let alpn_proto = match alpn_proto {
+        "h3" => quiche::h3::APPLICATION_PROTOCOL,
+
+        "siduck" => SIDUCK_ALPN,
+
+        _ => panic!("Application protocol \"{}\" not supported", alpn_proto),
+    };
+
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
@@ -112,9 +124,7 @@ fn main() {
         .load_priv_key_from_pem_file(args.get_str("--key"))
         .unwrap();
 
-    config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
-        .unwrap();
+    config.set_application_protos(alpn_proto).unwrap();
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -318,9 +328,59 @@ fn main() {
 
             debug!("{} processed {} bytes", client.conn.trace_id(), read);
 
-            // Create a new HTTP/3 connection as soon as the QUIC connection
-            // is established.
-            if client.conn.is_established() && client.http3_conn.is_none() {
+            // If we negotiated SiDUCK, once the QUIC connection is established
+            // try to read datagrams.
+            if alpn_proto == SIDUCK_ALPN && client.conn.is_established() {
+                match client.conn.dgram_recv() {
+                    Ok(v) => {
+                        let data = unsafe { std::str::from_utf8_unchecked(&v) };
+                        info!("Received DATAGRAM data {:?}", data);
+
+                        // TODO
+                        if data != "quack" {
+                            match client.conn.close(
+                                true,
+                                0x101,
+                                b"only quacks echo",
+                            ) {
+                                // Already closed.
+                                Ok(_) | Err(quiche::Error::Done) => (),
+
+                                Err(e) => panic!("error closing conn: {:?}", e),
+                            }
+
+                            break;
+                        }
+
+                        match client
+                            .conn
+                            .dgram_send(format!("{}-ack", data).as_bytes())
+                        {
+                            Ok(v) => v,
+
+                            Err(e) => {
+                                error!("failed to send request {:?}", e);
+                                break;
+                            },
+                        }
+                    },
+
+                    Err(quiche::Error::Done) => break,
+
+                    Err(e) => {
+                        error!("failure receiving DATAGRAM failure {:?}", e);
+
+                        break 'read;
+                    },
+                }
+            }
+
+            // If we negotiated HTTP/3, create a new HTTP/3 connection as soon
+            // as the QUIC connection is established.
+            if alpn_proto == quiche::h3::APPLICATION_PROTOCOL &&
+                client.conn.is_established() &&
+                client.http3_conn.is_none()
+            {
                 debug!(
                     "{} QUIC handshake completed, now trying HTTP/3",
                     client.conn.trace_id()
