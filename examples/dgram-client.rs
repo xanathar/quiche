@@ -33,6 +33,8 @@ use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+const SIDUCK_ALPN: &[u8] = b"\x06siduck";
+
 const USAGE: &str = "Usage:
   dgram-client [options] URL
   dgram-client -h | --help
@@ -43,7 +45,8 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
-  -d --data DATA           The DATAGRAM frame data [default: hello].
+  -a --alpn-proto ALPN     Application protocol on which to send DATAGRAM [default: h3]
+  -d --data DATA           The DATAGRAM frame data [default: quack].
   -n --datagrams DGRAMS    Send the given number of identical DATAGRAM frames [default: 1].
   -h --help                Show this screen.
 ";
@@ -70,6 +73,15 @@ fn main() {
     let version = u32::from_str_radix(version, 16).unwrap();
 
     let url = url::Url::parse(args.get_str("URL")).unwrap();
+
+    let alpn_proto = args.get_str("--alpn-proto");
+    let alpn_proto = match alpn_proto {
+        "h3" => quiche::h3::APPLICATION_PROTOCOL,
+
+        "siduck" => SIDUCK_ALPN,
+
+        _ => panic!("Application protocol \"{}\" not supported", alpn_proto),
+    };
 
     let dgram_data = args.get_str("--data");
 
@@ -112,9 +124,7 @@ fn main() {
 
     config.verify_peer(true);
 
-    config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
-        .unwrap();
+    config.set_application_protos(alpn_proto).unwrap();
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -224,6 +234,50 @@ fn main() {
             };
 
             debug!("processed {} bytes", read);
+
+            // If we negotiated SiDUCK, once the QUIC connection is established
+            // try to read datagrams.
+            if alpn_proto == SIDUCK_ALPN && conn.is_established() {
+                match conn.dgram_recv() {
+                    Ok(v) => {
+                        let data = unsafe { std::str::from_utf8_unchecked(&v) };
+
+                        info!("Received DATAGRAM data {:?}", data);
+                        dgrams_complete += 1;
+
+                        debug!(
+                            "{}/{} dgrams received",
+                            dgrams_complete, dgrams_count
+                        );
+
+                        if dgrams_complete == dgrams_count {
+                            info!(
+                                "{}/{} dgrams(s) received in {:?}, closing...",
+                                dgrams_complete,
+                                dgrams_count,
+                                dgram_start.elapsed()
+                            );
+
+                            match conn.close(true, 0x00, b"kthxbye") {
+                                // Already closed.
+                                Ok(_) | Err(quiche::Error::Done) => (),
+
+                                Err(e) => panic!("error closing conn: {:?}", e),
+                            }
+
+                            break;
+                        }
+                    },
+
+                    Err(quiche::Error::Done) => break,
+
+                    Err(e) => {
+                        error!("failure receiving DATAGRAM failure {:?}", e);
+
+                        break 'read;
+                    },
+                }
+            }
         }
 
         if conn.is_closed() {
@@ -237,16 +291,44 @@ fn main() {
             break;
         }
 
-        // Create a new HTTP/3 connection once the QUIC connection is established.
-        if conn.is_established() && http3_conn.is_none() {
+        // If we negotiated quack, once the QUIC connection is established send
+        // QUIC datagrams until all have been sent.
+        if alpn_proto == SIDUCK_ALPN && conn.is_established() {
+            let mut dgrams_done = 0;
+
+            for _ in dgrams_sent..dgrams_count {
+                info!("sending DATAGRAM data {:?}", dgram_data);
+
+                match conn.dgram_send(dgram_data.as_bytes()) {
+                    Ok(v) => v,
+
+                    Err(e) => {
+                        error!("failed to send dgram {:?}", e);
+
+                        break;
+                    },
+                }
+
+                dgrams_done += 1;
+            }
+
+            dgrams_sent += dgrams_done;
+        }
+
+        // If we negotiated HTTP/3, once the QUIC connection is established
+        // create a new HTTP/3 connection.
+        if alpn_proto == quiche::h3::APPLICATION_PROTOCOL &&
+            conn.is_established() &&
+            http3_conn.is_none()
+        {
             http3_conn = Some(
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)
                     .unwrap(),
             );
         }
 
-        // Send datagrams once the QUIC connection is established, and until
-        // all datagrams have been sent.
+        // Once the HTTP/3 connection is established, send HTTP/3 datagrams until
+        // all have been sent.
         if let Some(h3_conn) = &mut http3_conn {
             let mut dgrams_done = 0;
 

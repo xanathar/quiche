@@ -1330,7 +1330,7 @@ impl Connection {
         let mut b = octets::Octets::with_slice(&mut v);
         let flow_id = b.get_varint()?;
         let data = b.get_bytes(b.len() - b.off())?;
-        return Ok((flow_id, Event::Datagram(data.to_vec())));
+        Ok((flow_id, Event::Datagram(data.to_vec())))
     }
 
     fn process_frame(
