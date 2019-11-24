@@ -51,7 +51,7 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
-  -a --alpn-proto ALPN     Application protocol on which to send DATAGRAM [default: h3]
+  -a --app-proto PROTO        Application protocol (siduck, wq-vvv) on which to send DATAGRAM [default: h3]
   -d --data DATA           The DATAGRAM frame data [default: quack].
   -n --datagrams DGRAMS    Send the given number of identical DATAGRAM frames [default: 1].
   -h --help                Show this screen.
@@ -80,13 +80,13 @@ fn main() {
 
     let url = url::Url::parse(args.get_str("URL")).unwrap();
 
-    let alpn_proto = args.get_str("--alpn-proto");
+    let app_proto = args.get_str("--app-proto");
 
-    if url.scheme() == "quic-transport" && alpn_proto != "wq-vvv" {
+    if url.scheme() == "quic-transport" && app_proto != "wq-vvv" {
         warn!("\"quic-transport\" scheme provided with incompatible ALPN, correcting the ALPN")
     }
 
-    let app_params = match alpn_proto {
+    let app_params = match app_proto {
         "h3" => ApplicationParameters {
             proto: quiche::h3::APPLICATION_PROTOCOL,
             initial_max_streams_bidi: 100,
@@ -105,7 +105,7 @@ fn main() {
             initial_max_streams_uni: 1,
         },
 
-        _ => panic!("Application protocol \"{}\" not supported", alpn_proto),
+        _ => panic!("Application protocol \"{}\" not supported", app_proto),
     };
 
     let dgram_data = args.get_str("--data");

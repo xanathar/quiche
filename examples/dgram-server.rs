@@ -53,12 +53,12 @@ Options:
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 3].
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
-  -a --alpn-proto ALPN        Application protocol on which to send DATAGRAM [default: h3]
+  -a --app-proto PROTO        Application protocol (h3, siduck) on which to send DATAGRAM [default: h3]
   -h --help                   Show this screen.
 ";
 
 struct Client {
-    conn: Box<quiche::Connection>,
+    conn: std::pin::Pin<Box<quiche::Connection>>,
 
     http3_conn: Option<quiche::h3::Connection>,
 }
@@ -89,13 +89,13 @@ fn main() {
     let max_streams_uni = args.get_str("--max-streams-uni");
     let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
 
-    let alpn_proto = args.get_str("--alpn-proto");
-    let alpn_proto = match alpn_proto {
+    let app_proto = args.get_str("--app-proto");
+    let alpn_proto = match app_proto {
         "h3" => quiche::h3::APPLICATION_PROTOCOL,
 
         "siduck" => SIDUCK_ALPN,
 
-        _ => panic!("Application protocol \"{}\" not supported", alpn_proto),
+        _ => panic!("Application protocol \"{}\" not supported", app_proto),
     };
 
     // Setup the event loop.
@@ -407,7 +407,7 @@ fn main() {
                 loop {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
-                    match http3_conn.poll(client.conn.as_mut()) {
+                    match http3_conn.poll(&mut client.conn) {
                         Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
                             info!(
                                 "Received DATAGRAM flow_id={} dat= {:?}",
