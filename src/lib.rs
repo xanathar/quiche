@@ -2836,6 +2836,12 @@ impl Connection {
 
         let data = self.dgram_queue.pop_readable()?.to_vec();
 
+        if data.len() >
+            self.local_transport_params.max_datagram_frame_size as usize
+        {
+            return Err(Error::BufferTooShort);
+        }
+
         Ok(data)
     }
 
@@ -2861,6 +2867,11 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
+        if buf.len() > self.peer_transport_params.max_datagram_frame_size as usize
+        {
+            return Err(Error::BufferTooShort);
+        }
+
         let data = stream::RangeBuf::from(buf, 0, true);
 
         self.dgram_queue.push_writable(data)?;
@@ -6084,3 +6095,4 @@ mod ranges;
 mod recovery;
 mod stream;
 mod tls;
+pub mod webtransport;
