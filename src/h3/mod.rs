@@ -156,7 +156,11 @@
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
-//!         }
+//!         },
+//!
+//!         Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
+//!             // Peer sent a Datagram frame, handle it.
+//!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -206,6 +210,10 @@
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
+//!         },
+//!
+//!         Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
+//!             // Peer sent a Datagram frame, handle it.
 //!         },
 //!
 //!         Err(e) => {

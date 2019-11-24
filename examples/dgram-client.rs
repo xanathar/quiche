@@ -35,6 +35,12 @@ const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const SIDUCK_ALPN: &[u8] = b"\x06siduck";
 
+struct ApplicationParameters {
+    proto: &'static [u8],
+    initial_max_streams_bidi: u64,
+    initial_max_streams_uni: u64,
+}
+
 const USAGE: &str = "Usage:
   dgram-client [options] URL
   dgram-client -h | --help
@@ -75,10 +81,29 @@ fn main() {
     let url = url::Url::parse(args.get_str("URL")).unwrap();
 
     let alpn_proto = args.get_str("--alpn-proto");
-    let alpn_proto = match alpn_proto {
-        "h3" => quiche::h3::APPLICATION_PROTOCOL,
 
-        "siduck" => SIDUCK_ALPN,
+    if url.scheme() == "quic-transport" && alpn_proto != "wq-vvv" {
+        warn!("\"quic-transport\" scheme provided with incompatible ALPN, correcting the ALPN")
+    }
+
+    let app_params = match alpn_proto {
+        "h3" => ApplicationParameters {
+            proto: quiche::h3::APPLICATION_PROTOCOL,
+            initial_max_streams_bidi: 100,
+            initial_max_streams_uni: 3,
+        },
+
+        "siduck" => ApplicationParameters {
+            proto: SIDUCK_ALPN,
+            initial_max_streams_bidi: 0,
+            initial_max_streams_uni: 0,
+        },
+
+        "wq-vvv" => ApplicationParameters {
+            proto: quiche::webtransport::QUICTRANSPORT_ALPN,
+            initial_max_streams_bidi: 1,
+            initial_max_streams_uni: 1,
+        },
 
         _ => panic!("Application protocol \"{}\" not supported", alpn_proto),
     };
@@ -124,7 +149,7 @@ fn main() {
 
     config.verify_peer(true);
 
-    config.set_application_protos(alpn_proto).unwrap();
+    config.set_application_protos(app_params.proto).unwrap();
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -132,12 +157,13 @@ fn main() {
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_stream_data_uni(max_stream_data);
-    config.set_initial_max_streams_bidi(0);
-    config.set_initial_max_streams_uni(3);
+    config.set_initial_max_streams_bidi(app_params.initial_max_streams_bidi);
+    config.set_initial_max_streams_uni(app_params.initial_max_streams_uni);
     config.set_disable_active_migration(true);
     config.set_max_datagram_frame_size(500);
 
     let mut http3_conn = None;
+    let mut quictransport_conn = None;
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
@@ -237,7 +263,7 @@ fn main() {
 
             // If we negotiated SiDUCK, once the QUIC connection is established
             // try to read datagrams.
-            if alpn_proto == SIDUCK_ALPN && conn.is_established() {
+            if app_params.proto == SIDUCK_ALPN && conn.is_established() {
                 match conn.dgram_recv() {
                     Ok(v) => {
                         let data = unsafe { std::str::from_utf8_unchecked(&v) };
@@ -291,13 +317,13 @@ fn main() {
             break;
         }
 
-        // If we negotiated quack, once the QUIC connection is established send
+        // If we negotiated SiDuck, once the QUIC connection is established send
         // QUIC datagrams until all have been sent.
-        if alpn_proto == SIDUCK_ALPN && conn.is_established() {
+        if app_params.proto == SIDUCK_ALPN && conn.is_established() {
             let mut dgrams_done = 0;
 
             for _ in dgrams_sent..dgrams_count {
-                info!("sending DATAGRAM data {:?}", dgram_data);
+                info!("sending QUIC DATAGRAM with data {:?}", dgram_data);
 
                 match conn.dgram_send(dgram_data.as_bytes()) {
                     Ok(v) => v,
@@ -315,9 +341,60 @@ fn main() {
             dgrams_sent += dgrams_done;
         }
 
+        // If we negotiated QuicTransport, once the QUIC connection is established
+        // send the QuicTransport client indication and send datagrams.
+        if app_params.proto == quiche::webtransport::QUICTRANSPORT_ALPN &&
+            conn.is_established() &&
+            quictransport_conn.is_none()
+        {
+            let mut path = String::from(url.path());
+
+            if let Some(query) = url.query() {
+                path.push('?');
+                path.push_str(query);
+            }
+
+            quictransport_conn = Some(
+                quiche::webtransport::QuicTransport::with_transport(
+                    &mut conn,
+                    &path,
+                    url.host_str().unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+
+        // Once the QuicTransport connection is established, send all QUIC
+        // datagrams until all have been sent.
+        if let Some(quictransport_conn) = &mut quictransport_conn {
+            let mut dgrams_done = 0;
+
+            for _ in dgrams_sent..dgrams_count {
+                info!(
+                    "sending QuicTransport DATAGRAM with data {:?}",
+                    dgram_data
+                );
+
+                match quictransport_conn
+                    .dgram_send(&mut conn, dgram_data.as_bytes())
+                {
+                    Ok(v) => v,
+
+                    Err(e) => {
+                        error!("failed to send dgram {:?}", e);
+                        break;
+                    },
+                }
+
+                dgrams_done += 1;
+            }
+
+            dgrams_sent += dgrams_done;
+        }
+
         // If we negotiated HTTP/3, once the QUIC connection is established
         // create a new HTTP/3 connection.
-        if alpn_proto == quiche::h3::APPLICATION_PROTOCOL &&
+        if app_params.proto == quiche::h3::APPLICATION_PROTOCOL &&
             conn.is_established() &&
             http3_conn.is_none()
         {
@@ -333,7 +410,7 @@ fn main() {
             let mut dgrams_done = 0;
 
             for _ in dgrams_sent..dgrams_count {
-                info!("sending DATAGRAM data {:?}", dgram_data);
+                info!("sending HTTP/3 DATAGRAM with data {:?}", dgram_data);
 
                 match h3_conn.dgram_send(&mut conn, 0, dgram_data.as_bytes()) {
                     Ok(v) => v,
