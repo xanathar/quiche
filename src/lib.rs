@@ -2832,10 +2832,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn dgram_recv(
-        &mut self,
-    ) -> Result<Vec<u8>> {
-
+    pub fn dgram_recv(&mut self) -> Result<Vec<u8>> {
         let data = self.dgram_queue.pop_readable()?.to_vec();
 
         if data.len() >
@@ -4338,8 +4335,13 @@ mod tests {
         };
 
         let mut raw_params = [42; 256];
-        let mut raw_params =
-            TransportParams::encode(&tp, PROTOCOL_VERSION_DRAFT25, true, &mut raw_params).unwrap();
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION_DRAFT25,
+            true,
+            &mut raw_params,
+        )
+        .unwrap();
         assert_eq!(raw_params.len(), 106);
 
         let new_tp = TransportParams::decode(

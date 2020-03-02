@@ -107,8 +107,13 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
         h3::Event::Data { .. } => 1,
 
         h3::Event::Finished { .. } => 2,
+    }
+}
 
-        h3::Event::Datagram { .. } => 3,
+#[no_mangle]
+pub extern fn quiche_h3_datagram_event_type(ev: &h3::DatagramEvent) -> u32 {
+    match ev {
+        h3::DatagramEvent::Received { .. } => 0,
     }
 }
 
