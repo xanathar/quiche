@@ -158,10 +158,6 @@
 //!             // Peer terminated stream, handle it.
 //!         },
 //!
-//!         Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
-//!             // Peer sent a Datagram frame, handle it.
-//!         },
-//!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
@@ -210,10 +206,6 @@
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
-//!         },
-//!
-//!         Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
-//!             // Peer sent a Datagram frame, handle it.
 //!         },
 //!
 //!         Err(e) => {
@@ -479,9 +471,12 @@ pub enum Event {
 
     /// Stream was closed,
     Finished,
+}
 
+/// todo
+pub enum DatagramEvent {
     /// Datagram was received
-    Datagram(Vec<u8>),
+    Received(Vec<u8>),
 }
 
 struct ConnectionSettings {
@@ -905,6 +900,13 @@ impl Connection {
             }
         }
 
+        Err(Error::Done)
+    }
+
+    /// todo
+    pub fn poll_dgram(
+        &mut self, conn: &mut super::Connection,
+    ) -> Result<(u64, DatagramEvent)> {
         // Process Datagrams
         let ev = match self.process_dgram(conn) {
             Ok(v) => Some(v),
@@ -1326,12 +1328,12 @@ impl Connection {
     /// Process Datagrams
     pub fn process_dgram(
         &mut self, conn: &mut super::Connection,
-    ) -> Result<(u64, Event)> {
+    ) -> Result<(u64, DatagramEvent)> {
         let mut v = conn.dgram_recv()?;
         let mut b = octets::Octets::with_slice(&mut v);
         let flow_id = b.get_varint()?;
         let data = b.get_bytes(b.len() - b.off())?;
-        Ok((flow_id, Event::Datagram(data.to_vec())))
+        Ok((flow_id, DatagramEvent::Received(data.to_vec())))
     }
 
     fn process_frame(

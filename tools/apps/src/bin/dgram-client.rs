@@ -51,7 +51,8 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
-  -a --app-proto PROTO        Application protocol (siduck, wq-vvv) on which to send DATAGRAM [default: h3]
+  --max-datagram-frame BYTES Maximum datagram frame size [default: 500]
+  -a --app-proto PROTO     Application protocol (siduck, wq-vvv) on which to send DATAGRAM [default: h3]
   -d --data DATA           The DATAGRAM frame data [default: quack].
   -n --datagrams DGRAMS    Send the given number of identical DATAGRAM frames [default: 1].
   -h --help                Show this screen.
@@ -74,6 +75,9 @@ fn main() {
 
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+
+    let max_datagram_frame= args.get_str("--max-datagram-frame");
+    let max_datagram_frame = u64::from_str_radix(max_datagram_frame, 10).unwrap();
 
     let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16).unwrap();
@@ -151,7 +155,7 @@ fn main() {
 
     config.set_application_protos(app_params.proto).unwrap();
 
-    config.set_idle_timeout(5000);
+    config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(max_data);
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
@@ -160,7 +164,7 @@ fn main() {
     config.set_initial_max_streams_bidi(app_params.initial_max_streams_bidi);
     config.set_initial_max_streams_uni(app_params.initial_max_streams_uni);
     config.set_disable_active_migration(true);
-    config.set_max_datagram_frame_size(500);
+    config.set_max_datagram_frame_size(max_datagram_frame);
 
     let mut http3_conn = None;
     let mut quictransport_conn = None;
@@ -430,8 +434,8 @@ fn main() {
         if let Some(http3_conn) = &mut http3_conn {
             // Process HTTP/3 events.
             loop {
-                match http3_conn.poll(&mut conn) {
-                    Ok((flow_id, quiche::h3::Event::Datagram(data))) => {
+                match http3_conn.poll_dgram(&mut conn) {
+                    Ok((flow_id, quiche::h3::DatagramEvent::Received(data))) => {
                         info!(
                             "Received DATAGRAM flow_id={} dat= {:?}",
                             flow_id, data
