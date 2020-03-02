@@ -691,6 +691,8 @@ impl Config {
     /// The default value is `quiche::CongestionControlAlgorithm::Reno`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
     /// Sets the `max_datagram_frame_size` transport parameter.
     ///
     /// The default is `0`.
@@ -3994,7 +3996,7 @@ mod tests {
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params).unwrap();
+            TransportParams::encode(&tp, PROTOCOL_VERSION_DRAFT25, true, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 106);
 
         let new_tp = TransportParams::decode(
@@ -4033,7 +4035,7 @@ mod tests {
             &mut raw_params,
         )
         .unwrap();
-        assert_eq!(raw_params.len(), 81);
+        assert_eq!(raw_params.len(), 86);
 
         let new_tp = TransportParams::decode(
             &mut raw_params,
