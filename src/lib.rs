@@ -5169,7 +5169,7 @@ mod tests {
         // Corrupt the packets's last byte to make decryption fail (the last
         // byte is part of the AEAD tag, so changing it means that the packet
         // cannot be authenticated during decryption).
-        buf[written - 1] = 0;
+        buf[written - 1] = !buf[written - 1];
 
         assert_eq!(pipe.server.timeout(), None);
 
@@ -5200,7 +5200,7 @@ mod tests {
         // Corrupt the packets's last byte to make decryption fail (the last
         // byte is part of the AEAD tag, so changing it means that the packet
         // cannot be authenticated during decryption).
-        buf[written - 1] = 0;
+        buf[written - 1] = !buf[written - 1];
 
         assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
 
