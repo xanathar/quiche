@@ -146,6 +146,7 @@ impl QuicTransport {
     ) -> Result<()> {
         if buf.len() > conn.peer_transport_params.max_datagram_frame_size as usize
         {
+            trace!("attempt to send DATAGRAM larger than peer's max_datagram_frame_size");
             return Err(Error::BufferTooShort);
         }
 
