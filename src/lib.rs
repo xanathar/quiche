@@ -2838,6 +2838,7 @@ impl Connection {
         if data.len() >
             self.local_transport_params.max_datagram_frame_size as usize
         {
+            trace!("received a DATAGRAM larger than max_datagram_frame_size");
             return Err(Error::BufferTooShort);
         }
 
@@ -2868,6 +2869,7 @@ impl Connection {
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
         if buf.len() > self.peer_transport_params.max_datagram_frame_size as usize
         {
+            trace!("attempt to send DATAGRAM larger than peer's max_datagram_frame_size");
             return Err(Error::BufferTooShort);
         }
 
@@ -3950,8 +3952,12 @@ impl TransportParams {
             }
 
             if tp.max_datagram_frame_size != 0 {
-                b.put_u16(0x0020)?;
-                b.put_u16(octets::varint_len(tp.max_datagram_frame_size) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0020,
+                    octets::varint_len(tp.max_datagram_frame_size),
+                    version,
+                )?;
                 b.put_varint(tp.max_datagram_frame_size)?;
             }
 
