@@ -43,9 +43,9 @@ const USAGE: &str = "Usage:
 
 Options:
   --listen <addr>             Listen on the given IP:port [default: 127.0.0.1:4433]
-  --cert <file>               TLS certificate path [default: examples/cert.crt]
-  --key <file>                TLS certificate key path [default: examples/cert.key]
-  --root <dir>                Root directory [default: examples/root/]
+  --cert <file>               TLS certificate path [default: src/bin/cert.crt]
+  --key <file>                TLS certificate key path [default: src/bin/cert.key]
+  --root <dir>                Root directory [default: src/bin/root/]
   --name <str>                Name of the server [default: quic.tech]
   --max-data BYTES            Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
@@ -53,7 +53,7 @@ Options:
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 3].
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
-  -a --app-proto PROTO        Application protocol (h3, siduck) on which to send DATAGRAM [default: h3]
+  -a --app-proto PROTO        Application protocol (h3, siduck) on which to send DATAGRAM [default: siduck]
   -h --help                   Show this screen.
 ";
 
@@ -147,6 +147,10 @@ fn main() {
 
     let h3_config = quiche::h3::Config::new().unwrap();
 
+    let rng = SystemRandom::new();
+    let conn_id_seed =
+        ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
+
     let mut clients = ClientMap::new();
 
     loop {
@@ -165,7 +169,7 @@ fn main() {
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
             if events.is_empty() {
-                debug!("timed out");
+                trace!("timed out");
 
                 clients.values_mut().for_each(|(_, c)| c.conn.on_timeout());
 
@@ -179,7 +183,7 @@ fn main() {
                     // There are no more UDP packets to read, so end the read
                     // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("recv() would block");
+                        trace!("recv() would block");
                         break 'read;
                     }
 
@@ -187,7 +191,7 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            trace!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
 
@@ -206,20 +210,20 @@ fn main() {
 
             trace!("got packet {:?}", hdr);
 
-            if hdr.ty == quiche::Type::VersionNegotiation {
-                error!("Version negotiation invalid on the server");
-                continue;
-            }
+            let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
+            let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(&hdr.dcid) {
+            let (_, client) = if !clients.contains_key(&hdr.dcid) &&
+                !clients.contains_key(conn_id)
+            {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
                     continue;
                 }
 
-                if hdr.version != quiche::PROTOCOL_VERSION {
+                if !quiche::version_is_supported(hdr.version) {
                     warn!("Doing version negotiation");
 
                     let len =
@@ -230,7 +234,7 @@ fn main() {
 
                     if let Err(e) = socket.send_to(out, &src) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            debug!("send() would block");
+                            trace!("send() would block");
                             break;
                         }
 
@@ -239,9 +243,8 @@ fn main() {
                     continue;
                 }
 
-                // Generate a random source connection ID for the connection.
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-                SystemRandom::new().fill(&mut scid[..]).unwrap();
+                scid.copy_from_slice(&conn_id);
 
                 let mut odcid = None;
 
@@ -263,7 +266,7 @@ fn main() {
 
                         if let Err(e) = socket.send_to(out, &src) {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                debug!("send() would block");
+                                trace!("send() would block");
                                 break;
                             }
 
@@ -308,7 +311,11 @@ fn main() {
 
                 clients.get_mut(&scid[..]).unwrap()
             } else {
-                clients.get_mut(&hdr.dcid).unwrap()
+                match clients.get_mut(&hdr.dcid) {
+                    Some(v) => v,
+
+                    None => clients.get_mut(conn_id).unwrap(),
+                }
             };
 
             // Process potentially coalesced packets.
@@ -316,7 +323,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done reading", client.conn.trace_id());
+                    trace!("{} done reading", client.conn.trace_id());
                     break;
                 },
 
@@ -326,11 +333,14 @@ fn main() {
                 },
             };
 
-            debug!("{} processed {} bytes", client.conn.trace_id(), read);
+            trace!("{} processed {} bytes", client.conn.trace_id(), read);
 
             // If we negotiated SiDUCK, once the QUIC connection is established
             // try to read datagrams.
-            if alpn_proto == SIDUCK_ALPN && client.conn.is_established() {
+            if alpn_proto == SIDUCK_ALPN &&
+                (client.conn.is_in_early_data() ||
+                    client.conn.is_established())
+            {
                 match client.conn.dgram_recv() {
                     Ok(v) => {
                         let data = unsafe { std::str::from_utf8_unchecked(&v) };
@@ -378,7 +388,8 @@ fn main() {
             // If we negotiated HTTP/3, create a new HTTP/3 connection as soon
             // as the QUIC connection is established.
             if alpn_proto == quiche::h3::APPLICATION_PROTOCOL &&
-                client.conn.is_established() &&
+                (client.conn.is_in_early_data() ||
+                    client.conn.is_established()) &&
                 client.http3_conn.is_none()
             {
                 debug!(
@@ -408,7 +419,10 @@ fn main() {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
                     match http3_conn.poll_dgram(&mut client.conn) {
-                        Ok((flow_id, quiche::h3::DatagramEvent::Received(data))) => {
+                        Ok((
+                            flow_id,
+                            quiche::h3::DatagramEvent::Received(data),
+                        )) => {
                             info!(
                                 "Received DATAGRAM flow_id={} dat= {:?}",
                                 flow_id, data
@@ -441,8 +455,6 @@ fn main() {
 
                             break 'read;
                         },
-
-                        _ => unreachable!(),
                     }
                 }
             }
@@ -457,7 +469,7 @@ fn main() {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
-                        debug!("{} done writing", client.conn.trace_id());
+                        trace!("{} done writing", client.conn.trace_id());
                         break;
                     },
 
@@ -472,20 +484,20 @@ fn main() {
                 // TODO: coalesce packets.
                 if let Err(e) = socket.send_to(&out[..write], &peer) {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("send() would block");
+                        trace!("send() would block");
                         break;
                     }
 
                     panic!("send() failed: {:?}", e);
                 }
 
-                debug!("{} written {} bytes", client.conn.trace_id(), write);
+                trace!("{} written {} bytes", client.conn.trace_id(), write);
             }
         }
 
         // Garbage collect closed connections.
         clients.retain(|_, (_, ref mut c)| {
-            debug!("Collecting garbage");
+            trace!("Collecting garbage");
 
             if c.conn.is_closed() {
                 info!(

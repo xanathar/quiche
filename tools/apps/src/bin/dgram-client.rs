@@ -51,8 +51,8 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
-  --max-datagram-frame BYTES Maximum datagram frame size [default: 500]
-  -a --app-proto PROTO     Application protocol (siduck, wq-vvv) on which to send DATAGRAM [default: h3]
+  --max-dgram-frame BYTES  Maximum datagram frame size [default: 500].
+  -a --app-proto PROTO     Application protocol (siduck, wq-vvv) on which to send DATAGRAM [default: siduck]
   -d --data DATA           The DATAGRAM frame data [default: quack].
   -n --datagrams DGRAMS    Send the given number of identical DATAGRAM frames [default: 1].
   -h --help                Show this screen.
@@ -76,7 +76,7 @@ fn main() {
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
-    let max_datagram_frame= args.get_str("--max-datagram-frame");
+    let max_datagram_frame = args.get_str("--max-dgram-frame");
     let max_datagram_frame = u64::from_str_radix(max_datagram_frame, 10).unwrap();
 
     let version = args.get_str("--wire-version");
@@ -199,14 +199,14 @@ fn main() {
 
     while let Err(e) = socket.send(&out[..write]) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
-            debug!("send() would block");
+            trace!("send() would block");
             continue;
         }
 
         panic!("send() failed: {:?}", e);
     }
 
-    debug!("written {}", write);
+    trace!("written {}", write);
 
     let h3_config = quiche::h3::Config::new().unwrap();
 
@@ -224,7 +224,7 @@ fn main() {
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
             if events.is_empty() {
-                debug!("timed out");
+                trace!("timed out");
 
                 conn.on_timeout();
 
@@ -238,7 +238,7 @@ fn main() {
                     // There are no more UDP packets to read, so end the read
                     // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("recv() would block");
+                        trace!("recv() would block");
                         break 'read;
                     }
 
@@ -246,14 +246,14 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            trace!("got {} bytes", len);
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("done reading");
+                    trace!("done reading");
                     break;
                 },
 
@@ -263,7 +263,7 @@ fn main() {
                 },
             };
 
-            debug!("processed {} bytes", read);
+            trace!("processed {} bytes", read);
 
             // If we negotiated SiDUCK, once the QUIC connection is established
             // try to read datagrams.
@@ -475,8 +475,6 @@ fn main() {
 
                         break;
                     },
-
-                    _ => unreachable!(),
                 }
             }
         }
@@ -488,7 +486,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("done writing");
+                    trace!("done writing");
                     break;
                 },
 
@@ -502,14 +500,14 @@ fn main() {
 
             if let Err(e) = socket.send(&out[..write]) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
-                    debug!("send() would block");
+                    trace!("send() would block");
                     break;
                 }
 
                 panic!("send() failed: {:?}", e);
             }
 
-            debug!("written {}", write);
+            trace!("written {}", write);
         }
 
         if conn.is_closed() {
