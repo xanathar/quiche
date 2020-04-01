@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi;
+use std::mem::ManuallyDrop;
 use std::ptr;
 use std::slice;
 use std::sync::atomic;
@@ -203,6 +204,11 @@ pub extern fn quiche_config_set_ack_delay_exponent(config: &mut Config, v: u64) 
 #[no_mangle]
 pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
     config.set_max_ack_delay(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_max_datagram_frame_size(config: &mut Config, v: u64) {
+    config.set_max_datagram_frame_size(v);
 }
 
 #[no_mangle]
@@ -642,4 +648,47 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
 #[no_mangle]
 pub extern fn quiche_conn_free(conn: *mut Connection) {
     unsafe { Box::from_raw(conn) };
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_send(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.dgram_send(buf) {
+        Ok(_) => buf_len as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_recv(
+    conn: &mut Connection, buf: *mut *const u8,
+) -> ssize_t {
+    match conn.dgram_recv() {
+        Ok(mut v) => {
+            v.shrink_to_fit();
+            let len = v.len();
+            let mut v = ManuallyDrop::new(v);
+            unsafe { *buf = v.as_mut_ptr(); }
+            len as ssize_t
+        },
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_free(_conn: *mut Connection, dgram: *mut u8, dgram_len: size_t) {
+    if dgram_len > <ssize_t>::max_value() as usize {
+        panic!("The provided dgram_len is too large");
+    }
+
+    unsafe { let _ = Vec::from_raw_parts(dgram, dgram_len, dgram_len); }
 }
