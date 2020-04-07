@@ -367,8 +367,6 @@ fn main() {
 
                             break 'read;
                         },
-
-                        _ => unreachable!(),
                     }
                 }
             }
