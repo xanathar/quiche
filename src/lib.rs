@@ -1810,24 +1810,29 @@ impl Connection {
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
+        trace!("tracing send : 1");
 
         if out.is_empty() {
+            trace!("tracing send : R1");
             return Err(Error::BufferTooShort);
         }
 
         if self.draining_timer.is_some() {
+            trace!("tracing send : R2");
             return Err(Error::Done);
         }
 
         // If the Initial secrets have not been derived yet, there's no point
         // in trying to send a packet, so return early.
         if !self.derived_initial_secrets {
+            trace!("tracing send : R3");
             return Err(Error::Done);
         }
 
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if !is_closing {
+            trace!("tracing send : R4");
             self.do_handshake()?;
         }
 
@@ -1837,8 +1842,10 @@ impl Connection {
 
         let pkt_type = packet::Type::from_epoch(epoch);
 
+        trace!("tracing send : R5");
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
+            trace!("tracing send : R5fl");
             match lost {
                 frame::Frame::Crypto { data } => {
                     self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
@@ -1878,6 +1885,7 @@ impl Connection {
                 _ => (),
             }
         }
+        trace!("tracing send : R6");
 
         let mut left = b.cap();
 
