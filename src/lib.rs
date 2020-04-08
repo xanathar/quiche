@@ -3067,6 +3067,7 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
+        trace!("--epoch 1");
         if self.error.is_some() {
             let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
@@ -3083,6 +3084,7 @@ impl Connection {
 
             return Ok(epoch);
         }
+        trace!("--epoch 2");
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
             // Only send 1-RTT packets when handshake is complete.
@@ -3092,16 +3094,19 @@ impl Connection {
 
             // We are ready to send data for this packet number space.
             if self.pkt_num_spaces[epoch].ready() {
+                trace!("--epoch rx1");
                 return Ok(epoch);
             }
 
             // There are lost frames in this packet number space.
             if !self.recovery.lost[epoch].is_empty() {
+                trace!("--epoch rx2");
                 return Ok(epoch);
             }
 
             // We need to send PTO probe packets.
             if self.recovery.loss_probes[epoch] > 0 {
+                trace!("--epoch rx3");
                 return Ok(epoch);
             }
         }
@@ -3114,9 +3119,11 @@ impl Connection {
                 self.streams.has_flushable() ||
                 self.streams.has_almost_full())
         {
+            trace!("--epoch r4");
             return Ok(packet::EPOCH_APPLICATION);
         }
 
+        trace!("--epoch r5");
         Err(Error::Done)
     }
 
