@@ -1810,45 +1810,35 @@ impl Connection {
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
-        trace!("tracing send : 1");
 
         if out.is_empty() {
-            trace!("tracing send : R1");
             return Err(Error::BufferTooShort);
         }
 
         if self.draining_timer.is_some() {
-            trace!("tracing send : R2");
             return Err(Error::Done);
         }
 
         // If the Initial secrets have not been derived yet, there's no point
         // in trying to send a packet, so return early.
         if !self.derived_initial_secrets {
-            trace!("tracing send : R3");
             return Err(Error::Done);
         }
 
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if !is_closing {
-            trace!("tracing send : R4");
             self.do_handshake()?;
         }
-        trace!("tracing send : R4a");
 
         let mut b = octets::Octets::with_slice(out);
-        trace!("tracing send : R4b");
 
         let epoch = self.write_epoch()?;
-        trace!("tracing send : R4c");
 
         let pkt_type = packet::Type::from_epoch(epoch);
 
-        trace!("tracing send : R5");
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
-            trace!("tracing send : R5fl");
             match lost {
                 frame::Frame::Crypto { data } => {
                     self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
@@ -1888,7 +1878,6 @@ impl Connection {
                 _ => (),
             }
         }
-        trace!("tracing send : R6");
 
         let mut left = b.cap();
 
@@ -3067,7 +3056,6 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
-        trace!("--epoch 1");
         if self.error.is_some() {
             let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
@@ -3084,7 +3072,6 @@ impl Connection {
 
             return Ok(epoch);
         }
-        trace!("--epoch 2");
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
             // Only send 1-RTT packets when handshake is complete.
@@ -3094,19 +3081,16 @@ impl Connection {
 
             // We are ready to send data for this packet number space.
             if self.pkt_num_spaces[epoch].ready() {
-                trace!("--epoch rx1");
                 return Ok(epoch);
             }
 
             // There are lost frames in this packet number space.
             if !self.recovery.lost[epoch].is_empty() {
-                trace!("--epoch rx2");
                 return Ok(epoch);
             }
 
             // We need to send PTO probe packets.
             if self.recovery.loss_probes[epoch] > 0 {
-                trace!("--epoch rx3");
                 return Ok(epoch);
             }
         }
@@ -3124,11 +3108,9 @@ impl Connection {
                 self.streams.has_flushable() ||
                 self.streams.has_almost_full())
         {
-            trace!("--epoch r4");
             return Ok(packet::EPOCH_APPLICATION);
         }
 
-        trace!("--epoch r5");
         Err(Error::Done)
     }
 
