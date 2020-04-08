@@ -1835,10 +1835,13 @@ impl Connection {
             trace!("tracing send : R4");
             self.do_handshake()?;
         }
+        trace!("tracing send : R4a");
 
         let mut b = octets::Octets::with_slice(out);
+        trace!("tracing send : R4b");
 
         let epoch = self.write_epoch()?;
+        trace!("tracing send : R4c");
 
         let pkt_type = packet::Type::from_epoch(epoch);
 
