@@ -3111,6 +3111,11 @@ impl Connection {
             }
         }
 
+        // If there are pending datagrams, use Application.
+        if self.dgram_queue.any_readable() {
+            return Ok(packet::EPOCH_APPLICATION);
+        }
+
         // If there are flushable streams, use Application.
         if self.is_established() &&
             (self.should_update_max_data() ||

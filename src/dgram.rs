@@ -48,6 +48,10 @@ impl DatagramQueue {
         }
     }
 
+    pub fn any_readable(&self) -> bool {
+        self.readable.is_empty()
+    }
+
     pub fn push_readable(&mut self, data: stream::RangeBuf) -> Result<()> {
         if self.writable.len() == MAX_FRAME_COUNT {
             return Err(Error::Done);
