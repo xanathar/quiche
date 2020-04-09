@@ -160,19 +160,21 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         while((dgram_len = quiche_conn_dgram_recv(conn_io->conn, &dgram_data)) > 0) {
             printf("dgram received of len %d", (int)dgram_len);
-            quiche_conn_dgram_free(conn_io->conn, dgram_data, dgram_len);
 
             uint32_t datagram_seq = 0;
             memcpy(&datagram_seq, dgram_data, sizeof(uint32_t));
 
             if (datagram_seq > 1024) {
                 const static uint8_t r[] = "DGRAM-STOP\r\n";
-                if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true) < 0) {
-                    fprintf(stderr, "failed to send DGRAM-STOP request\n");
-                    return;
+                ssize_t res = quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true);
+                if (res < 0) {
+                    fprintf(stderr, "failed to send DGRAM-STOP request %zd\n", res);
+                } else {
+                    fprintf(stderr, "sent DGRAM-STOP request\n");
                 }
-                fprintf(stderr, "sent DGRAM-STOP request\n");
             }
+
+            quiche_conn_dgram_free(conn_io->conn, dgram_data, dgram_len);
         }
 
         readable = quiche_conn_readable(conn_io->conn);

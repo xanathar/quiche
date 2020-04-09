@@ -97,7 +97,7 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     ssize_t total = 0;
 
     while (1) {
-        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
+        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out) - 1);
 
         if (written == QUICHE_ERR_DONE) {
             fprintf(stderr, "done writing - %zd\n", total);
@@ -363,16 +363,17 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
                 if (recv_len > sizeof(dgram_start_command) && 
                     !memcmp(buf, dgram_start_command, 
-                            sizeof(dgram_start_command))) {
+                            sizeof(dgram_start_command) - 1)) {
                     static const char *resp = "ok\n";
                     quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
                                             3, false);
                     conn_io->last_dgram_sent = 0;
-                    printf("Connection entered benchmark mode\n");
+                    fprintf(stderr, "received start of datagrams, sending data\n");
                 } else {
                     static const char *resp = "byez\n";
                     quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
                                             5, true);
+                    fprintf(stderr, "received end of session, sending byez\n");
                 }
             }
 
@@ -471,8 +472,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_config_load_cert_chain_from_pem_file(config, "examples/cert.crt");
-    quiche_config_load_priv_key_from_pem_file(config, "examples/cert.key");
+    quiche_config_load_cert_chain_from_pem_file(config, "cert.crt");
+    quiche_config_load_priv_key_from_pem_file(config, "cert.key");
 
     quiche_config_set_application_protos(config,
         (uint8_t *) "\x0dtest-dgram-01", 14);
