@@ -19,12 +19,18 @@ LDFLAGS = -L$(LIBCRYPTO_DIR) -L$(LIBSSL_DIR) -L$(LIB_DIR)
 
 LIBS = $(LIB_DIR)/libquiche.a -lev -ldl -pthread
 
-all: client server http3-client http3-server
+all: client server http3-client http3-server dgram-client dgram-server
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 server: server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+
+dgram-client: dgram-client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+
+dgram-server: dgram-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 http3-client: http3-client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
@@ -37,4 +43,4 @@ $(LIB_DIR)/libquiche.a: $(shell find $(SOURCE_DIR) -type f -name '*.rs')
 	cd .. && cargo build --target-dir $(BUILD_DIR)
 
 clean:
-	@$(RM) -rf client server http3-client http3-server build/
+	@$(RM) -rf client server dgram-client dgram-server http3-client http3-server build/
