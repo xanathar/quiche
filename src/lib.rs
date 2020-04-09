@@ -2876,9 +2876,10 @@ impl Connection {
             }
         }
 
-        // If there are flushable streams, use Application.
+        // If there are flushable streams or datagrams, use Application.
         if self.is_established() &&
             (self.should_update_max_data() ||
+                self.dgram_queue.has_pending_writable() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||

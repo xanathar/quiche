@@ -90,4 +90,8 @@ impl DatagramQueue {
         // None => Err(Error::Done)
         // }
     }
+
+    pub fn has_pending_writable(&self) -> bool {
+        !self.writable.is_empty()
+    }
 }
