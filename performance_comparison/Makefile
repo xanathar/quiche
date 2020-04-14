@@ -2,11 +2,11 @@ OS := $(shell uname)
 
 SOURCE_DIR = ../src
 BUILD_DIR = $(CURDIR)/build
-LIB_DIR = $(BUILD_DIR)/debug
+LIB_DIR = $(BUILD_DIR)/release
 INCLUDE_DIR = ../include
 
 INCS = -I$(INCLUDE_DIR)
-CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g
+CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g -O3
 
 ifeq ($(OS), Darwin)
 CFLAGS += -framework Security
@@ -28,7 +28,7 @@ bench-server: bench-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 $(LIB_DIR)/libquiche.a: $(shell find $(SOURCE_DIR) -type f -name '*.rs')
-	cd .. && cargo build --target-dir $(BUILD_DIR)
+	cd .. && cargo build --release --target-dir $(BUILD_DIR)
 
 clean:
 	@$(RM) -rf bench-client bench-server build/

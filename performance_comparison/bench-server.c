@@ -53,6 +53,7 @@
     QUICHE_MAX_CONN_ID_LEN
 
 #define DBG_FPRINTF(...)
+#define ERR_FPRINTF fprintf
 
 struct connections {
     int sock;
@@ -91,7 +92,7 @@ static void free_conn_if_closed(struct ev_loop *loop, struct conn_io *conn_io);
 static uint32_t datagram_data[256];
 
 static void debug_log(const char *line, void *argp) {
-    DBG_FPRINTF(stderr, "%s\n", line);
+    ERR_FPRINTF(stderr, "%s\n", line);
 }
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
@@ -102,12 +103,11 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
         ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out) - 1);
 
         if (written == QUICHE_ERR_DONE) {
-            DBG_FPRINTF(stderr, "done writing - %zd\n", total);
             break;
         }
 
         if (written < 0) {
-            DBG_FPRINTF(stderr, "failed to create packet: %zd\n", written);
+            ERR_FPRINTF(stderr, "failed to create packet: %zd\n", written);
             return;
         }
 
@@ -170,7 +170,7 @@ static bool validate_token(const uint8_t *token, size_t token_len,
 static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     struct conn_io *conn_io = malloc(sizeof(*conn_io));
     if (conn_io == NULL) {
-        DBG_FPRINTF(stderr, "failed to allocate connection IO\n");
+        ERR_FPRINTF(stderr, "failed to allocate connection IO\n");
         return NULL;
     }
 
@@ -189,7 +189,7 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
                                       odcid, odcid_len, config);
     if (conn == NULL) {
-        DBG_FPRINTF(stderr, "failed to create connection\n");
+        ERR_FPRINTF(stderr, "failed to create connection\n");
         return NULL;
     }
 
@@ -269,7 +269,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                            out, sizeof(out));
 
                 if (written < 0) {
-                    DBG_FPRINTF(stderr, "failed to create vneg packet: %zd\n",
+                    ERR_FPRINTF(stderr, "failed to create vneg packet: %zd\n",
                             written);
                     return;
                 }
@@ -299,7 +299,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                out, sizeof(out));
 
                 if (written < 0) {
-                    DBG_FPRINTF(stderr, "failed to create retry packet: %zd\n",
+                    ERR_FPRINTF(stderr, "failed to create retry packet: %zd\n",
                             written);
                     return;
                 }
@@ -319,7 +319,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
             if (!validate_token(token, token_len, &peer_addr, peer_addr_len,
                                odcid, &odcid_len)) {
-                DBG_FPRINTF(stderr, "invalid address validation token\n");
+                ERR_FPRINTF(stderr, "invalid address validation token\n");
                 return;
             }
 
@@ -340,7 +340,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         }
 
         if (done < 0) {
-            DBG_FPRINTF(stderr, "failed to process packet: %zd\n", done);
+            ERR_FPRINTF(stderr, "failed to process packet: %zd\n", done);
             return;
         }
 
@@ -392,13 +392,38 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
 static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents) {
     struct conn_io *conn_io = w->data;
+    /* static ssize_t bandwidth_opener_count = 0 * (1 << 20); */
+
+    if (conn_io->last_dgram_sent < 0) {
+        return;
+    }
+
+/*    if (bandwidth_opener_count > 0) {
+        ssize_t sent = 1;
+        while(sent > 0 && bandwidth_opener_count > 0) {
+            sent = quiche_conn_stream_send(conn_io->conn, 4, (uint8_t *)datagram_data, sizeof(datagram_data), false);
+            if (sent > 0) {
+                bandwidth_opener_count -= sent;
+            }
+            flush_egress(loop, conn_io);
+            //printf("  bandwidth opener sent %zd, remaining: %zd\n", sent, bandwidth_opener_count);
+        }
+        printf("bandwidth opener remaining: %zd\n", bandwidth_opener_count);
+        
+        return;
+    }
+*/
 
     if (conn_io->last_dgram_sent >= 0) {
-        for(int i = 0; i < 1024; i++) {
+        int pkt_count = 0;
+        ssize_t res = 0;
+        while(res >= 0) {
             datagram_data[0] = conn_io->last_dgram_sent++;
-            quiche_conn_dgram_send(conn_io->conn, (uint8_t *)datagram_data, sizeof(datagram_data));
-        }
+            res = quiche_conn_dgram_send(conn_io->conn, (uint8_t *)datagram_data, sizeof(datagram_data));
+            ++pkt_count;
+        } 
         flush_egress(loop, conn_io);
+        // printf("sent %d datagrams\n", pkt_count); 
     }
 
     free_conn_if_closed(loop, conn_io);
@@ -518,7 +543,7 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
     quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);
     quiche_config_set_initial_max_streams_bidi(config, 100);
-    quiche_config_set_cc_algorithm(config, QUICHE_CC_RENO);
+    quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
     quiche_config_set_max_datagram_frame_size(config, 64000);
 
     struct connections c;

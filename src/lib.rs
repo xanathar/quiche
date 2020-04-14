@@ -1706,6 +1706,8 @@ impl Connection {
             }
         }
 
+
+        // Space left in the packet
         let mut left = b.cap();
 
         // Use max_packet_size as sent by the peer, except during the handshake
@@ -1721,9 +1723,6 @@ impl Connection {
             1200
         };
 
-        // Limit output packet size to respect peer's max_packet_size limit.
-        left = cmp::min(left, max_pkt_len);
-
         // Limit output packet size by congestion window size.
         left = cmp::min(left, self.recovery.cwnd_available());
 
@@ -1732,6 +1731,13 @@ impl Connection {
         if !self.verified_peer_address && self.is_server {
             left = cmp::min(left, self.max_send_bytes);
         }
+
+        // Datagram extensions are not subject to max_packet_size limits,
+        // we count space left for datagrams separately
+        let mut dgram_left:usize = left;
+
+        // Limit output packet size to respect peer's max_packet_size limit.
+        left = cmp::min(left, max_pkt_len);
 
         let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -1773,9 +1779,16 @@ impl Connection {
 
         // Make sure we have enough space left for the header, the payload
         // length, the packet number and the AEAD overhead.
-        left = left
+        dgram_left = dgram_left
             .checked_sub(b.off() + pn_len + overhead)
             .ok_or(Error::Done)?;
+
+        // Same as above for non-datagram frames, but we don't return if
+        // space left for non-datagram frames is 0 (at least, not yet)  
+        left = match left.checked_sub(b.off() + pn_len + overhead) {
+            Some(n) => n,
+            None => 0,
+        };
 
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
@@ -1789,6 +1802,46 @@ impl Connection {
         let mut in_flight = false;
 
         let mut payload_len = 0;
+
+        // Create DATAGRAM frame.
+        // When an application sends an unreliable datagram over a QUIC
+        // connection, QUIC will generate a new DATAGRAM frame and send it in
+        // the first available packet. This frame SHOULD be sent as soon as
+        // possible, and MAY be coalesced with other frames.
+        if pkt_type == packet::Type::Short &&
+            dgram_left > frame::MAX_DGRAM_OVERHEAD &&
+            !is_closing
+        {
+            while let Some(len) = self.dgram_queue.peek_writable() {
+                // Make sure we can fit the data in the packet.
+                if dgram_left > frame::MAX_DGRAM_OVERHEAD + len {
+                    let data = match self.dgram_queue.pop_writable() {
+                        Some(v) => v,
+                        None => continue,
+                    };
+
+                    let frame = frame::Frame::Datagram { data };
+
+                    payload_len += frame.wire_len();
+                    dgram_left -= frame.wire_len();
+
+                    left = match left.checked_sub(frame.wire_len()) {
+                        Some(n) => n,
+                        None => 0,
+                    };
+
+                    frames.push(frame);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                } else {
+                    break;
+                }
+            }
+        } else if left == 0 {
+            // we cannot add datagrams, and we are zero len
+            return Err(Error::Done);
+        }
 
         // Create ACK frame.
         if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
@@ -1960,35 +2013,6 @@ impl Connection {
             if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 ack_eliciting = true;
                 in_flight = true;
-            }
-        }
-
-        // Create DATAGRAM frame.
-        if pkt_type == packet::Type::Short &&
-            left > frame::MAX_DGRAM_OVERHEAD &&
-            !is_closing
-        {
-            while let Some(len) = self.dgram_queue.peek_writable() {
-                // Make sure we can fit the data in the packet.
-                if left > frame::MAX_DGRAM_OVERHEAD + len {
-                    let data = match self.dgram_queue.pop_writable() {
-                        Some(v) => v,
-
-                        None => continue,
-                    };
-
-                    let frame = frame::Frame::Datagram { data };
-
-                    payload_len += frame.wire_len();
-                    left -= frame.wire_len();
-
-                    frames.push(frame);
-
-                    ack_eliciting = true;
-                    in_flight = true;
-                } else {
-                    break;
-                }
             }
         }
 
@@ -2560,6 +2584,28 @@ impl Connection {
 
         Ok(data)
     }
+
+    /// Attempts to read a stored Datagram on a given buffer (copy)
+    pub fn dgram_recv_on_buf(&mut self, out: &mut [u8]) -> Result<usize> {
+        let data = self.dgram_queue.pop_readable()?.to_vec();
+
+        if data.len() >
+            self.local_transport_params.max_datagram_frame_size as usize
+        {
+            trace!("received a DATAGRAM larger than max_datagram_frame_size");
+            return Err(Error::BufferTooShort);
+        }
+
+        if data.len() > out.len() {
+            trace!("received a DATAGRAM larger than out buffer");
+            return Err(Error::BufferTooShort);
+        }
+
+        out[0..data.len()].copy_from_slice(&data);
+        Ok(data.len())
+    }
+
+
 
     /// Send data in a Datagram frame.
     ///

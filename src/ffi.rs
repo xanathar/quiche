@@ -668,6 +668,26 @@ pub extern fn quiche_conn_dgram_send(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_dgram_recv_on_buf(
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
+) -> ssize_t {
+
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    let out_len = match conn.dgram_recv_on_buf(out) {
+        Ok(v) => v,
+
+        Err(e) => return e.to_c(),
+    };
+
+    out_len as ssize_t
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_recv(
     conn: &mut Connection, buf: *mut *const u8,
 ) -> ssize_t {

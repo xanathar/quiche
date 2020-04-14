@@ -169,6 +169,7 @@ void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
+    QUICHE_CC_NOCC = 1,
 };
 
 // Sets the congestion control algorithm used.
@@ -241,10 +242,12 @@ ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t **out);
 void quiche_conn_dgram_free(quiche_conn *conn, uint8_t *dgram,
                             size_t dgram_len);
 
+ssize_t quiche_conn_dgram_recv_on_buf(quiche_conn *conn, uint8_t *out, 
+                                      size_t buf_len);
+
 // Sends a datagram
 ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
                                size_t buf_len);
-
 
 enum quiche_shutdown {
     QUICHE_SHUTDOWN_READ = 0,

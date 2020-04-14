@@ -57,6 +57,8 @@
 
 #define DBG_FPRINTF(...)
 
+static bool use_recv_on_buf = false;
+
 struct conn_io {
     ev_timer timer;
 
@@ -166,11 +168,23 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     if (quiche_conn_is_established(conn_io->conn)) {
         uint64_t s = 0;
         quiche_stream_iter *readable;
-        uint8_t *dgram_data;
-        ssize_t dgram_len;
+        uint8_t data_buf[65536];
 
-        while((dgram_len = quiche_conn_dgram_recv(conn_io->conn, &dgram_data)) > 0) {
+        while(1) { 
             uint32_t datagram_seq = 0;
+            uint8_t *dgram_data = NULL;
+            ssize_t dgram_len = 0;
+            
+            if (use_recv_on_buf) {
+                dgram_len = quiche_conn_dgram_recv_on_buf(conn_io->conn, data_buf, 65536);
+                dgram_data = data_buf;
+            } else {
+                dgram_len = quiche_conn_dgram_recv(conn_io->conn, &dgram_data);
+            }
+
+            if (dgram_len < 0) 
+                break;
+            
             memcpy(&datagram_seq, dgram_data, sizeof(uint32_t));
 
             if (benchmark_handle_dgram(datagram_seq, dgram_data, dgram_len)) {
@@ -183,8 +197,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
             }
 
-            quiche_conn_dgram_free(conn_io->conn, dgram_data, dgram_len);
-        }
+            if (!use_recv_on_buf) {
+                quiche_conn_dgram_free(conn_io->conn, dgram_data, dgram_len);
+            }
+        } 
 
         readable = quiche_conn_readable(conn_io->conn);
 
@@ -199,7 +215,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 break;
             }
 
-            printf("%.*s", (int) recv_len, buf);
+            //printf("%.*s", (int) recv_len, buf);
+            printf("received %zd bytes on stream %llu, [%s]\n", recv_len, s, fin ? "FIN" : "...");
 
             if (fin) {
                 if (quiche_conn_close(conn_io->conn, true, 0, NULL, 0) < 0) {
@@ -219,8 +236,8 @@ This function gets called each dgram. Must compute stats and return 1 when prog 
 And measure time! that's the point.
 */
 
-#define BYTES_BEFORE_BENCHMARK_START (1 << 20)
-#define BYTES_BEFORE_BENCHMARK_TARGET (1 << 20)
+#define BYTES_BEFORE_BENCHMARK_START (1 * (1 << 20))
+#define BYTES_BEFORE_BENCHMARK_TARGET (256 * (1 << 20))
 #define EXPECTED_DATAGRAM_SIZE 1024
 
 double timeval_diff_sec(struct timespec *end, struct timespec *start)
@@ -323,7 +340,7 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     time_mono_spent = timeval_diff_sec(&stop_mono_time, &start_mono_time);
     bandwidth = (((double)stats_total_bytes) / time_mono_spent) / ((double)(1 << 20));
 
-    last_packet_expected = (uint32_t)(stats_total_bytes / EXPECTED_DATAGRAM_SIZE);
+    last_packet_expected = (uint32_t)((BYTES_BEFORE_BENCHMARK_TARGET + BYTES_BEFORE_BENCHMARK_START) / EXPECTED_DATAGRAM_SIZE);
     memcpy(&last_packet_rcvd, dgram_data, sizeof(uint32_t));
     packet_loss_est = last_packet_rcvd - last_packet_expected;
 
@@ -375,6 +392,7 @@ static int32_t set_sock_buf(int sock, int buf, int32_t size) {
 int main(int argc, char *argv[]) {
     const char *host = argv[1];
     const char *port = argv[2];
+    const char *copy_mode = argv[3];
 
     const struct addrinfo hints = {
         .ai_family = PF_UNSPEC,
@@ -391,6 +409,16 @@ int main(int argc, char *argv[]) {
     if (getaddrinfo(host, port, &hints, &peer) != 0) {
         perror("failed to resolve host");
         return -1;
+    }
+
+    if (copy_mode == NULL) {
+        perror("copy_mode not specified: [copy|nocopy]");
+    } else if (0 == strcmp(copy_mode, "copy")) {
+        use_recv_on_buf = true;
+    } else if (0 == strcmp(copy_mode, "nocopy")) {
+        use_recv_on_buf = false;
+    } else {
+        perror("copy_mode invalid: must be 'copy' or 'nocopy'");
     }
 
     int sock = socket(peer->ai_family, SOCK_DGRAM, 0);
@@ -443,6 +471,7 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_streams_uni(config, 100);
     quiche_config_set_disable_active_migration(config, true);
     quiche_config_set_max_datagram_frame_size(config, 64000);
+    quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
 
     if (getenv("SSLKEYLOGFILE")) {
       quiche_config_log_keys(config);

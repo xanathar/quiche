@@ -50,6 +50,7 @@ pub const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 pub enum Algorithm {
     /// Reno congestion control algorithm (default). `reno` in a string form.
     Reno = 0,
+    NoCC = 1,
 }
 
 impl FromStr for Algorithm {
@@ -61,6 +62,7 @@ impl FromStr for Algorithm {
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         match name {
             "reno" => Ok(Algorithm::Reno),
+            "nocc" => Ok(Algorithm::NoCC),
             _ => Err(crate::Error::CongestionControl),
         }
     }
@@ -118,6 +120,7 @@ pub fn new_congestion_control(algo: Algorithm) -> Box<dyn CongestionControl> {
     trace!("Initializing congestion control: {:?}", algo);
     match algo {
         Algorithm::Reno => Box::new(cc::reno::Reno::new()),
+        Algorithm::NoCC => Box::new(cc::nocc::NoCC::new()),
     }
 }
 
@@ -150,3 +153,4 @@ mod tests {
 }
 
 mod reno;
+mod nocc;
