@@ -91,6 +91,14 @@ static void free_conn_if_closed(struct ev_loop *loop, struct conn_io *conn_io);
 
 static uint32_t datagram_data[256];
 
+typedef enum _OperationMode 
+{
+    OPMODE_QUIC_DX,
+    OPMODE_RAW_UDP
+} OperationMode;
+
+static OperationMode op_mode;
+
 static void debug_log(const char *line, void *argp) {
     ERR_FPRINTF(stderr, "%s\n", line);
 }
@@ -186,11 +194,18 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
         return NULL;
     }
 
-    quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
-                                      odcid, odcid_len, config);
-    if (conn == NULL) {
-        ERR_FPRINTF(stderr, "failed to create connection\n");
-        return NULL;
+    quiche_conn *conn;
+    
+    if (op_mode == OPMODE_QUIC_DX) {
+        conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
+                             odcid, odcid_len, config);
+                             
+        if (conn == NULL) {
+            ERR_FPRINTF(stderr, "failed to create connection\n");
+            return NULL;
+        }
+    } else {
+        conn = NULL;
     }
 
     conn_io->sock = conns->sock;
@@ -203,12 +218,51 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     conn_io->idle.data = conn_io;
     conn_io->last_dgram_sent = -1;
 
-    HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
-
     DBG_FPRINTF(stderr, "new connection\n");
 
     return conn_io;
 }
+
+static void recv_cb_udp(EV_P_ ev_io *w, int revents) {
+    struct conn_io *conn_io = NULL;
+
+    static uint8_t buf[65535];
+
+    while (1) {
+        struct sockaddr_storage peer_addr;
+        socklen_t peer_addr_len = sizeof(peer_addr);
+        memset(&peer_addr, 0, peer_addr_len);
+
+        ssize_t read = recvfrom(conns->sock, buf, sizeof(buf), 0,
+                                (struct sockaddr *) &peer_addr,
+                                &peer_addr_len);
+
+        if (read < 0) {
+            if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) {
+                DBG_FPRINTF(stderr, "recv would block\n");
+                break;
+            }
+
+            perror("failed to read");
+            return;
+        }
+
+        HASH_FIND(hh, conns->h, &peer_addr, peer_addr_len, conn_io);
+
+        if (conn_io == NULL) {
+            printf("Client connected\n");
+
+            conn_io = create_conn(NULL, 0);
+
+            if (conn_io != NULL) {
+                memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
+                conn_io->peer_addr_len = peer_addr_len;
+                HASH_ADD(hh, conns->h, peer_addr, peer_addr_len, conn_io);
+            }
+        }
+    }
+}
+
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
     struct conn_io *tmp, *conn_io = NULL;
@@ -327,9 +381,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             if (conn_io == NULL) {
                 return;
             }
-
             memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
             conn_io->peer_addr_len = peer_addr_len;
+            HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
         }
 
         ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
@@ -392,11 +446,47 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
 static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents) {
     struct conn_io *conn_io = w->data;
+
+    if (op_mode == OPMODE_RAW_UDP) {
+        if (conn_io->last_dgram_sent < 0) {
+            conn_io->last_dgram_sent = 0;
+            printf("Sending started...\n");
+        }
+
+        for(int i = 0; i < 1000; i++) {
+            datagram_data[0] = conn_io->last_dgram_sent++;
+            sendto(conn_io->sock, (uint8_t *)datagram_data, sizeof(datagram_data), 0,
+                   (struct sockaddr *) &conn_io->peer_addr,
+                   conn_io->peer_addr_len);            
+        }
+    }
+    else if (op_mode == OPMODE_QUIC_DX) {
+        if (conn_io->last_dgram_sent < 0) {
+            return;
+        }
+
+        if (conn_io->last_dgram_sent >= 0) {
+            int pkt_count = 0;
+            ssize_t res = 0;
+            while(res >= 0) {
+                datagram_data[0] = conn_io->last_dgram_sent++;
+                res = quiche_conn_dgram_send(conn_io->conn, (uint8_t *)datagram_data, sizeof(datagram_data));
+                if ((pkt_count % 1024) == 0) {
+                    // printf("sent %d last res : %zd\n", pkt_count, res);
+                }
+                ++pkt_count;
+            } 
+            flush_egress(loop, conn_io);
+            // printf("sent %d datagrams\n", pkt_count); 
+        }
+
+        free_conn_if_closed(loop, conn_io);        
+    }
+
+
     /* static ssize_t bandwidth_opener_count = 0 * (1 << 20); */
 
-    if (conn_io->last_dgram_sent < 0) {
-        return;
-    }
+
 
 /*    if (bandwidth_opener_count > 0) {
         ssize_t sent = 1;
@@ -414,19 +504,7 @@ static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents) {
     }
 */
 
-    if (conn_io->last_dgram_sent >= 0) {
-        int pkt_count = 0;
-        ssize_t res = 0;
-        while(res >= 0) {
-            datagram_data[0] = conn_io->last_dgram_sent++;
-            res = quiche_conn_dgram_send(conn_io->conn, (uint8_t *)datagram_data, sizeof(datagram_data));
-            ++pkt_count;
-        } 
-        flush_egress(loop, conn_io);
-        // printf("sent %d datagrams\n", pkt_count); 
-    }
 
-    free_conn_if_closed(loop, conn_io);
 }
 
 static void timeout_cb(EV_P_ ev_timer *w, int revents) {
@@ -473,6 +551,7 @@ static int32_t set_sock_buf(int sock, int buf, int32_t size) {
 int main(int argc, char *argv[]) {
     const char *host = argv[1];
     const char *port = argv[2];
+    const char *cmdline_op_mode = argv[3];
 
     const struct addrinfo hints = {
         .ai_family = PF_UNSPEC,
@@ -490,6 +569,20 @@ int main(int argc, char *argv[]) {
     struct addrinfo *local;
     if (getaddrinfo(host, port, &hints, &local) != 0) {
         perror("failed to resolve host");
+        return -1;
+    }
+
+    if (cmdline_op_mode == NULL) {
+        fprintf(stderr, "op_mode not specified: [qdx|rawudp]");
+        return -1;
+    } else if (0 == strcmp(cmdline_op_mode, "qdx")) {
+        printf("Starting in QUIC datagram mode\n");
+        op_mode = OPMODE_QUIC_DX;
+    } else if (0 == strcmp(cmdline_op_mode, "rawudp")) {
+        printf("Starting in UDP mode\n");
+        op_mode = OPMODE_RAW_UDP;
+    } else {
+        fprintf(stderr, "op_mode invalid: must be 'quiche' or 'rawudp'");
         return -1;
     }
 
@@ -525,26 +618,28 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    config = quiche_config_new(QUICHE_PROTOCOL_VERSION);
-    if (config == NULL) {
-        DBG_FPRINTF(stderr, "failed to create config\n");
-        return -1;
+    if (op_mode == OPMODE_QUIC_DX) {
+        config = quiche_config_new(QUICHE_PROTOCOL_VERSION);
+        if (config == NULL) {
+            DBG_FPRINTF(stderr, "failed to create config\n");
+            return -1;
+        }
+
+        quiche_config_load_cert_chain_from_pem_file(config, "cert.crt");
+        quiche_config_load_priv_key_from_pem_file(config, "cert.key");
+
+        quiche_config_set_application_protos(config,
+            (uint8_t *) "\x0dtest-dgram-01", 14);
+
+        quiche_config_set_max_idle_timeout(config, 5000);
+        quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
+        quiche_config_set_initial_max_data(config, 10000000);
+        quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
+        quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);
+        quiche_config_set_initial_max_streams_bidi(config, 100);
+        quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
+        quiche_config_set_max_datagram_frame_size(config, 64000);
     }
-
-    quiche_config_load_cert_chain_from_pem_file(config, "cert.crt");
-    quiche_config_load_priv_key_from_pem_file(config, "cert.key");
-
-    quiche_config_set_application_protos(config,
-        (uint8_t *) "\x0dtest-dgram-01", 14);
-
-    quiche_config_set_max_idle_timeout(config, 5000);
-    quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
-    quiche_config_set_initial_max_data(config, 10000000);
-    quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
-    quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);
-    quiche_config_set_initial_max_streams_bidi(config, 100);
-    quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
-    quiche_config_set_max_datagram_frame_size(config, 64000);
 
     struct connections c;
     c.sock = sock;
@@ -556,7 +651,11 @@ int main(int argc, char *argv[]) {
 
     struct ev_loop *loop = ev_default_loop(0);
 
-    ev_io_init(&watcher, recv_cb, sock, EV_READ);
+    if (op_mode == OPMODE_QUIC_DX) {
+        ev_io_init(&watcher, recv_cb, sock, EV_READ);
+    } else {
+        ev_io_init(&watcher, recv_cb_udp, sock, EV_READ);
+    }
     ev_io_start(loop, &watcher);
     watcher.data = &c;
 
@@ -564,7 +663,9 @@ int main(int argc, char *argv[]) {
 
     freeaddrinfo(local);
 
-    quiche_config_free(config);
+    if (op_mode == OPMODE_QUIC_DX) {
+        quiche_config_free(config);
+    }
 
     return 0;
 }

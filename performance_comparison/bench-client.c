@@ -57,7 +57,15 @@
 
 #define DBG_FPRINTF(...)
 
-static bool use_recv_on_buf = false;
+typedef enum _OperationMode 
+{
+    OPMODE_QUICHE_COPY,
+    OPMODE_QUICHE_NOCOPY,
+    OPMODE_RAW_UDP
+} OperationMode;
+
+
+static OperationMode op_mode;
 
 struct conn_io {
     ev_timer timer;
@@ -102,6 +110,35 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     conn_io->timer.repeat = t;
     ev_timer_again(loop, &conn_io->timer);
 }
+
+static void recv_cb_udp(EV_P_ ev_io *w, int revents) {
+    struct conn_io *conn_io = w->data;
+
+    static uint8_t buf[65535];
+
+    while (1) {
+        ssize_t read = recv(conn_io->sock, buf, sizeof(buf), 0);
+        uint32_t datagram_seq = 0;
+
+        if (read < 0) {
+            if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) {
+                DBG_FPRINTF(stderr, "recv would block\n");
+                break;
+            }
+
+            perror("failed to read");
+            return;
+        }
+
+        memcpy(&datagram_seq, buf, sizeof(uint32_t));
+
+        if (benchmark_handle_dgram(datagram_seq, buf, read)) {
+            printf("UDP done\n");
+            exit(0);
+        }
+    }
+}
+
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
     static bool req_sent = false;
@@ -175,7 +212,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             uint8_t *dgram_data = NULL;
             ssize_t dgram_len = 0;
             
-            if (use_recv_on_buf) {
+            if (op_mode == OPMODE_QUICHE_COPY) {
                 dgram_len = quiche_conn_dgram_recv_on_buf(conn_io->conn, data_buf, 65536);
                 dgram_data = data_buf;
             } else {
@@ -197,7 +234,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
             }
 
-            if (!use_recv_on_buf) {
+            if (op_mode == OPMODE_QUICHE_NOCOPY) {
                 quiche_conn_dgram_free(conn_io->conn, dgram_data, dgram_len);
             }
         } 
@@ -236,7 +273,7 @@ This function gets called each dgram. Must compute stats and return 1 when prog 
 And measure time! that's the point.
 */
 
-#define BYTES_BEFORE_BENCHMARK_START (1 * (1 << 20))
+#define BYTES_BEFORE_BENCHMARK_START (8 * (1 << 20))
 #define BYTES_BEFORE_BENCHMARK_TARGET (256 * (1 << 20))
 #define EXPECTED_DATAGRAM_SIZE 1024
 
@@ -359,6 +396,11 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
 
 static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     struct conn_io *conn_io = w->data;
+
+    if (op_mode == OPMODE_RAW_UDP) {
+        return;
+    }
+
     quiche_conn_on_timeout(conn_io->conn);
 
     DBG_FPRINTF(stderr, "timeout\n");
@@ -392,7 +434,7 @@ static int32_t set_sock_buf(int sock, int buf, int32_t size) {
 int main(int argc, char *argv[]) {
     const char *host = argv[1];
     const char *port = argv[2];
-    const char *copy_mode = argv[3];
+    const char *cmdline_op_mode = argv[3];
 
     const struct addrinfo hints = {
         .ai_family = PF_UNSPEC,
@@ -407,18 +449,25 @@ int main(int argc, char *argv[]) {
 
     struct addrinfo *peer;
     if (getaddrinfo(host, port, &hints, &peer) != 0) {
-        perror("failed to resolve host");
+        fprintf(stderr, "failed to resolve host");
         return -1;
     }
 
-    if (copy_mode == NULL) {
-        perror("copy_mode not specified: [copy|nocopy]");
-    } else if (0 == strcmp(copy_mode, "copy")) {
-        use_recv_on_buf = true;
-    } else if (0 == strcmp(copy_mode, "nocopy")) {
-        use_recv_on_buf = false;
+    if (cmdline_op_mode == NULL) {
+        fprintf(stderr, "op_mode not specified: [copy|nocopy|rawudp]");
+        return -1;
+    } else if (0 == strcmp(cmdline_op_mode, "copy")) {
+        op_mode = OPMODE_QUICHE_COPY;
+        printf("Starting in QUIC+COPY mode\n");
+    } else if (0 == strcmp(cmdline_op_mode, "nocopy")) {
+        op_mode = OPMODE_QUICHE_NOCOPY;
+        printf("Starting in QUIC+NO_COPY mode\n");
+    } else if (0 == strcmp(cmdline_op_mode, "rawudp")) {
+        printf("Starting in UDP mode\n");
+        op_mode = OPMODE_RAW_UDP;
     } else {
-        perror("copy_mode invalid: must be 'copy' or 'nocopy'");
+        fprintf(stderr, "op_mode invalid: must be 'copy', 'nocopy' or 'rawudp'");
+        return -1;
     }
 
     int sock = socket(peer->ai_family, SOCK_DGRAM, 0);
@@ -452,49 +501,54 @@ int main(int argc, char *argv[]) {
         perror("failed to connect socket");
         return -1;
     }
+    
+    quiche_conn *conn = NULL;
+    quiche_config *config = NULL;
+    
+    if (op_mode != OPMODE_RAW_UDP) {
+        config = quiche_config_new(0xbabababa);
+        if (config == NULL) {
+            DBG_FPRINTF(stderr, "failed to create config\n");
+            return -1;
+        }
 
-    quiche_config *config = quiche_config_new(0xbabababa);
-    if (config == NULL) {
-        DBG_FPRINTF(stderr, "failed to create config\n");
-        return -1;
-    }
+        quiche_config_set_application_protos(config,
+            (uint8_t *) "\x0dtest-dgram-01", 14);
 
-    quiche_config_set_application_protos(config,
-        (uint8_t *) "\x0dtest-dgram-01", 14);
+        quiche_config_set_max_idle_timeout(config, 5000);
+        quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
+        quiche_config_set_initial_max_data(config, 10000000);
+        quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
+        quiche_config_set_initial_max_stream_data_uni(config, 1000000);
+        quiche_config_set_initial_max_streams_bidi(config, 100);
+        quiche_config_set_initial_max_streams_uni(config, 100);
+        quiche_config_set_disable_active_migration(config, true);
+        quiche_config_set_max_datagram_frame_size(config, 64000);
+        quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
 
-    quiche_config_set_max_idle_timeout(config, 5000);
-    quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
-    quiche_config_set_initial_max_data(config, 10000000);
-    quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
-    quiche_config_set_initial_max_stream_data_uni(config, 1000000);
-    quiche_config_set_initial_max_streams_bidi(config, 100);
-    quiche_config_set_initial_max_streams_uni(config, 100);
-    quiche_config_set_disable_active_migration(config, true);
-    quiche_config_set_max_datagram_frame_size(config, 64000);
-    quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
+        if (getenv("SSLKEYLOGFILE")) {
+        quiche_config_log_keys(config);
+        }
 
-    if (getenv("SSLKEYLOGFILE")) {
-      quiche_config_log_keys(config);
-    }
+        uint8_t scid[LOCAL_CONN_ID_LEN];
+        int rng = open("/dev/urandom", O_RDONLY);
+        if (rng < 0) {
+            perror("failed to open /dev/urandom");
+            return -1;
+        }
 
-    uint8_t scid[LOCAL_CONN_ID_LEN];
-    int rng = open("/dev/urandom", O_RDONLY);
-    if (rng < 0) {
-        perror("failed to open /dev/urandom");
-        return -1;
-    }
+        ssize_t rand_len = read(rng, &scid, sizeof(scid));
+        if (rand_len < 0) {
+            perror("failed to create connection ID");
+            return -1;
+        }
 
-    ssize_t rand_len = read(rng, &scid, sizeof(scid));
-    if (rand_len < 0) {
-        perror("failed to create connection ID");
-        return -1;
-    }
-
-    quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid,
-                                       sizeof(scid), config);
-    if (conn == NULL) {
-        DBG_FPRINTF(stderr, "failed to create connection\n");
-        return -1;
+        conn = quiche_connect(host, (const uint8_t *) scid,
+                                            sizeof(scid), config);
+        if (conn == NULL) {
+            DBG_FPRINTF(stderr, "failed to create connection\n");
+            return -1;
+        }
     }
 
     struct conn_io *conn_io = malloc(sizeof(*conn_io));
@@ -510,14 +564,23 @@ int main(int argc, char *argv[]) {
 
     struct ev_loop *loop = ev_default_loop(0);
 
-    ev_io_init(&watcher, recv_cb, conn_io->sock, EV_READ);
+    if (op_mode == OPMODE_RAW_UDP) {
+        ev_io_init(&watcher, recv_cb_udp, conn_io->sock, EV_READ);
+    } else {
+        ev_io_init(&watcher, recv_cb, conn_io->sock, EV_READ);
+        ev_init(&conn_io->timer, timeout_cb);
+        conn_io->timer.data = conn_io;
+    }
+
     ev_io_start(loop, &watcher);
     watcher.data = conn_io;
 
-    ev_init(&conn_io->timer, timeout_cb);
-    conn_io->timer.data = conn_io;
-
-    flush_egress(loop, conn_io);
+    if (op_mode == OPMODE_RAW_UDP) {
+        int magic = 12345678;
+        send(conn_io->sock, &magic, sizeof(int), 0);
+    } else {
+        flush_egress(loop, conn_io);
+    }
 
     ev_loop(loop, 0);
 

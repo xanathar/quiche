@@ -31,7 +31,7 @@ use crate::Result;
 
 use crate::stream;
 
-const MAX_FRAME_COUNT: usize = 20000;
+const MAX_FRAME_COUNT: usize = 1000;
 
 /// Keeps track of Datagram frames.
 #[derive(Default)]
