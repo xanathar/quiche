@@ -45,7 +45,7 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_DATAGRAM_SIZE 1350
+#define MAX_DATAGRAM_SIZE 64400
 
 #define MAX_TOKEN_LEN \
     sizeof("quiche") - 1 + \
@@ -89,7 +89,7 @@ static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents);
 
 static void free_conn_if_closed(struct ev_loop *loop, struct conn_io *conn_io);
 
-static uint32_t datagram_data[256];
+static uint32_t datagram_data[16000];
 
 typedef enum _OperationMode 
 {

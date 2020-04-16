@@ -53,7 +53,10 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_DATAGRAM_SIZE 1350
+#define BYTES_BEFORE_BENCHMARK_START (128L * (1L << 20))
+#define BYTES_BEFORE_BENCHMARK_TARGET (4L * (1L << 30))
+
+#define MAX_DATAGRAM_SIZE 64400
 
 #define DBG_FPRINTF(...)
 
@@ -273,10 +276,6 @@ This function gets called each dgram. Must compute stats and return 1 when prog 
 And measure time! that's the point.
 */
 
-#define BYTES_BEFORE_BENCHMARK_START (8 * (1 << 20))
-#define BYTES_BEFORE_BENCHMARK_TARGET (256 * (1 << 20))
-#define EXPECTED_DATAGRAM_SIZE 1024
-
 double timeval_diff_sec(struct timespec *end, struct timespec *start)
 {
     double tend = end->tv_sec;
@@ -340,6 +339,7 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     static struct timespec start_cpu_time, start_mono_time;
     static int terminate = 0;
     static int started = 0;
+    static ssize_t packet_size = 0;
 
     double time_cpu_spent, time_mono_spent, bandwidth;
     struct timespec stop_cpu_time, stop_mono_time;
@@ -359,6 +359,8 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
         started = 1;
         stats_total_bytes = 0;
 
+        packet_size = dgram_len;
+        
         get_cpu_time(&start_cpu_time);
         get_mono_time(&start_mono_time);
 
@@ -377,7 +379,7 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     time_mono_spent = timeval_diff_sec(&stop_mono_time, &start_mono_time);
     bandwidth = (((double)stats_total_bytes) / time_mono_spent) / ((double)(1 << 20));
 
-    last_packet_expected = (uint32_t)((BYTES_BEFORE_BENCHMARK_TARGET + BYTES_BEFORE_BENCHMARK_START) / EXPECTED_DATAGRAM_SIZE);
+    last_packet_expected = (uint32_t)((BYTES_BEFORE_BENCHMARK_TARGET + BYTES_BEFORE_BENCHMARK_START) / packet_size);
     memcpy(&last_packet_rcvd, dgram_data, sizeof(uint32_t));
     packet_loss_est = last_packet_rcvd - last_packet_expected;
 
