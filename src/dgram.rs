@@ -31,25 +31,30 @@ use crate::Result;
 
 use crate::stream;
 
-const MAX_FRAME_COUNT: usize = 1000;
-
 /// Keeps track of Datagram frames.
 #[derive(Default)]
 pub struct DatagramQueue {
-    pub readable: VecDeque<stream::RangeBuf>,
-    pub writable: VecDeque<stream::RangeBuf>,
+    readable: VecDeque<stream::RangeBuf>,
+    writable: VecDeque<stream::RangeBuf>,
+    datagram_send_queue_size : usize,
+    datagram_recv_queue_size : usize,
 }
 
 impl DatagramQueue {
-    pub fn new() -> Self {
+    pub fn new(
+        datagram_send_queue_size : u64, 
+        datagram_recv_queue_size : u64) -> Self 
+    {
         DatagramQueue {
             readable: VecDeque::new(),
             writable: VecDeque::new(),
+            datagram_send_queue_size: datagram_send_queue_size as usize,
+            datagram_recv_queue_size: datagram_recv_queue_size as usize,
         }
     }
 
     pub fn push_readable(&mut self, data: stream::RangeBuf) -> Result<()> {
-        if self.writable.len() == MAX_FRAME_COUNT {
+        if self.readable.len() >= self.datagram_recv_queue_size {
             return Err(Error::Done);
         }
 
@@ -58,16 +63,12 @@ impl DatagramQueue {
         Ok(())
     }
 
-    pub fn pop_readable(&mut self) -> Result<stream::RangeBuf> {
-        match self.readable.pop_front() {
-            Some(v) => Ok(v),
-
-            None => Err(Error::Done),
-        }
+    pub fn pop_readable(&mut self) -> Option<stream::RangeBuf> {
+        self.readable.pop_front()
     }
 
     pub fn push_writable(&mut self, data: stream::RangeBuf) -> Result<()> {
-        if self.writable.len() == MAX_FRAME_COUNT {
+        if self.writable.len() >= self.datagram_send_queue_size {
             return Err(Error::Done);
         }
 
@@ -78,16 +79,19 @@ impl DatagramQueue {
 
     pub fn peek_writable(&self) -> Option<usize> {
         let data = self.writable.front()?.as_ref();
+
         Some(data.len())
+    }
+
+    pub fn empty_writable(&self) -> bool {
+        self.writable.is_empty()
     }
 
     pub fn pop_writable(&mut self) -> Option<stream::RangeBuf> {
         self.writable.pop_front()
+    }
 
-        // match self.writable.pop_front() {
-        // Some(v) => Ok(v),
-        //
-        // None => Err(Error::Done)
-        // }
+    pub fn purge_writable(&mut self, f: fn(&[u8]) -> bool) {
+        self.writable.retain(|d| !f(d));
     }
 }
