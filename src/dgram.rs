@@ -91,7 +91,7 @@ impl DatagramQueue {
         self.writable.pop_front()
     }
 
-    pub fn purge_writable(&mut self, f: fn(&[u8]) -> bool) {
+    pub fn purge_writable(&mut self, f: &dyn Fn(&[u8]) -> bool) {
         self.writable.retain(|d| !f(d));
     }
 }
