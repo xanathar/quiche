@@ -742,6 +742,10 @@ pub extern fn quiche_conn_datagram_purge_outgoing(
 #[no_mangle]
 pub extern fn quiche_conn_peer_datagram_frame_size(
     conn: &Connection,
-) -> u64 {
-    conn.peer_transport_params.max_datagram_frame_size
+) -> ssize_t {
+    match conn.peer_transport_params.max_datagram_frame_size {
+        Some(v) => v as ssize_t,
+
+        None => Error::Done.to_c(),
+    }
 }

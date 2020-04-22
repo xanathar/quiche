@@ -793,11 +793,17 @@ impl Connection {
     pub fn dgram_send(
         &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
     ) -> Result<()> {
+        let max_size = match conn.peer_transport_params.max_datagram_frame_size {
+            Some(v) => v as usize,
+            None => {
+                return Err(Error::BufferTooShort);
+            },
+        };
+
         let len = octets::varint_len(flow_id) + buf.len();
         let dgram_len = super::frame::MAX_DGRAM_OVERHEAD + len;
 
-        if dgram_len > conn.peer_transport_params.max_datagram_frame_size as usize
-        {
+        if dgram_len > max_size {
             return Err(Error::BufferTooShort);
         }
 

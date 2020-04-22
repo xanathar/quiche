@@ -144,7 +144,14 @@ impl QuicTransport {
     pub fn dgram_send(
         &mut self, conn: &mut super::Connection, buf: &[u8],
     ) -> Result<()> {
-        if buf.len() > conn.peer_transport_params.max_datagram_frame_size as usize
+        let max_size = match conn.peer_transport_params.max_datagram_frame_size {
+            Some(v) => v as usize,
+            None => {
+                return Err(Error::BufferTooShort);
+            },
+        };
+
+        if buf.len() > max_size
         {
             trace!("attempt to send DATAGRAM larger than peer's max_datagram_frame_size");
             return Err(Error::BufferTooShort);
