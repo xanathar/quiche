@@ -730,9 +730,9 @@ impl Config {
 
     /// Sets the `max_datagram_frame_size` transport parameter.
     ///
-    /// The default is `0`.
+    /// This enables the support for receiving the datagram frame types.
     pub fn set_max_datagram_frame_size(&mut self, v: u64) {
-        self.local_transport_params.max_datagram_frame_size = v;
+        self.local_transport_params.max_datagram_frame_size = Some(v);
     }
 
     /// Sets the maximum length of the datagrams frames send queue.
@@ -2858,13 +2858,6 @@ impl Connection {
             None => return Err(Error::Done),
         };
 
-        if data.len() >
-            self.local_transport_params.max_datagram_frame_size as usize
-        {
-            trace!("received a DATAGRAM larger than max_datagram_frame_size");
-            return Err(Error::BufferTooShort);
-        }
-
         if data.len() > out.len() {
             trace!("received a DATAGRAM larger than out buffer");
             return Err(Error::BufferTooShort);
@@ -2901,14 +2894,15 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn datagram_send(&mut self, buf: &[u8]) -> Result<()> {
-        if self.peer_transport_params.max_datagram_frame_size as usize == 0 {
-            trace!("attempt to send datagram to a peer without max_datagram_frame_size");
-            return Err(Error::InvalidState);
-        }
+        let max_size = match self.peer_transport_params.max_datagram_frame_size {
+            Some(v) => v as usize,
+            None => {
+                trace!("attempt to send datagram to a peer without max_datagram_frame_size");
+                return Err(Error::InvalidState);
+            },
+        };
 
-        if buf.len() > 
-            self.peer_transport_params.max_datagram_frame_size as usize 
-        {
+        if buf.len() > max_size {
             trace!("attempt to send datagram larger than peer's max_datagram_frame_size");
             return Err(Error::BufferTooShort);
         }
@@ -2922,7 +2916,7 @@ impl Connection {
 
     /// Gets the size of the largest Datagram frame supported by peer.
     ///
-    /// [`0`] is returned if the peer hasn't advertised a maximum datagram
+    /// [`None`] is returned if the peer hasn't advertised a maximum datagram
     /// frame size.
     ///
     /// ## Examples:
@@ -2933,12 +2927,14 @@ impl Connection {
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
-    /// if conn.peer_datagram_frame_size() > 5 {
-    ///     conn.datagram_send(b"hello")?;
+    /// if let Some(frame_size) = conn.peer_datagram_frame_size() {
+    ///     if frame_size > 5 {
+    ///         conn.datagram_send(b"hello")?;
+    ///     }
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn peer_datagram_frame_size(&self) -> u64 {
+    pub fn peer_datagram_frame_size(&self) -> Option<u64> {
         self.peer_transport_params.max_datagram_frame_size
     }
 
@@ -3540,6 +3536,29 @@ impl Connection {
             },
 
             frame::Frame::Datagram { data } => {
+                let max_size =
+                    match self.local_transport_params.max_datagram_frame_size
+                {
+                    Some(v) => v as usize,
+                    None => {
+                        // An endpoint that receives a DATAGRAM frame when it
+                        // has not sent the max_datagram_frame_size transport
+                        // parameter MUST terminate the connection with error
+                        // PROTOCOL_VIOLATION
+                        trace!("received a datagram without max_datagram_frame_size; closing.");
+                        return Err(Error::InvalidState);
+                    },
+                };
+
+                if data.len() > max_size {
+                    // An endpoint that receives a DATAGRAM frame that is
+                    // strictly larger than the value it sent in its
+                    // max_datagram_frame_size transport parameter MUST
+                    // terminate the connection with error PROTOCOL_VIOLATION.
+                    trace!("attempt to send datagram larger than peer's max_datagram_frame_size");
+                    return Err(Error::InvalidState);
+                }
+
                 // We intentionally let the recv consume data if the readable
                 // datagram queue is full.
                 let _ = self.dgram_queue.push_readable(stream::RangeBuf::from(
@@ -3706,7 +3725,7 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
-    pub max_datagram_frame_size: u64,
+    pub max_datagram_frame_size: Option<u64>,
 }
 
 impl Default for TransportParams {
@@ -3726,7 +3745,7 @@ impl Default for TransportParams {
             max_ack_delay: 25,
             disable_active_migration: false,
             active_conn_id_limit: 0,
-            max_datagram_frame_size: 0,
+            max_datagram_frame_size: None,
         }
     }
 }
@@ -3862,7 +3881,7 @@ impl TransportParams {
                 },
 
                 0x0020 => {
-                    tp.max_datagram_frame_size = val.get_varint()?;
+                    tp.max_datagram_frame_size = Some(val.get_varint()?);
                 },
 
                 // Ignore unknown parameters.
@@ -4035,14 +4054,14 @@ impl TransportParams {
                 b.put_varint(tp.active_conn_id_limit)?;
             }
 
-            if tp.max_datagram_frame_size != 0 {
+            if let Some(max_frame_size) = tp.max_datagram_frame_size {
                 TransportParams::encode_param(
                     &mut b,
                     0x0020,
-                    octets::varint_len(tp.max_datagram_frame_size),
+                    octets::varint_len(max_frame_size),
                     version,
                 )?;
-                b.put_varint(tp.max_datagram_frame_size)?;
+                b.put_varint(max_frame_size)?;
             }
 
             b.off()
@@ -4421,7 +4440,7 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
-            max_datagram_frame_size: 32,
+            max_datagram_frame_size: Some(32),
         };
 
         let mut raw_params = [42; 256];
@@ -4459,7 +4478,7 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
-            max_datagram_frame_size: 32,
+            max_datagram_frame_size: Some(32),
         };
 
         let mut raw_params = [42; 256];

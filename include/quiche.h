@@ -253,8 +253,9 @@ ssize_t quiche_conn_datagram_recv(quiche_conn *conn, uint8_t *buf,
 ssize_t quiche_conn_datagram_send(quiche_conn *conn, const uint8_t *buf,
                                   size_t buf_len);
 
-// Gets the size of the largest Datagram frame supported by peer.
-size_t quiche_conn_peer_datagram_frame_size(quiche_conn *conn);
+// Gets the size of the largest datagram frame supported by peer. If the peer
+// has not advertised datagram frame support, QUICHE_ERR_DONE is returned.
+ssize_t quiche_conn_peer_datagram_frame_size(quiche_conn *conn);
 
 // Iterates over the outgoing queue and purges datagrams matching the predicate.
 void quiche_conn_datagram_purge_outgoing(quiche_conn *conn,
