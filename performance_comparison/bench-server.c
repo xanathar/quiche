@@ -45,7 +45,8 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_DATAGRAM_SIZE 64400
+#define MAX_PACKET_SIZE 16300
+#define DATAGRAM_SIZE 16000
 
 #define MAX_TOKEN_LEN \
     sizeof("quiche") - 1 + \
@@ -89,7 +90,7 @@ static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents);
 
 static void free_conn_if_closed(struct ev_loop *loop, struct conn_io *conn_io);
 
-static uint32_t datagram_data[16000];
+static uint32_t datagram_data[DATAGRAM_SIZE / 4];
 
 typedef enum _OperationMode 
 {
@@ -104,7 +105,7 @@ static void debug_log(const char *line, void *argp) {
 }
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
-    static uint8_t out[MAX_DATAGRAM_SIZE];
+    static uint8_t out[MAX_PACKET_SIZE];
     ssize_t total = 0;
 
     while (1) {
@@ -268,7 +269,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     struct conn_io *tmp, *conn_io = NULL;
 
     static uint8_t buf[65535];
-    static uint8_t out[MAX_DATAGRAM_SIZE];
+    static uint8_t out[MAX_PACKET_SIZE];
 
     while (1) {
         struct sockaddr_storage peer_addr;
@@ -631,14 +632,14 @@ int main(int argc, char *argv[]) {
         quiche_config_set_application_protos(config,
             (uint8_t *) "\x0dtest-dgram-01", 14);
 
-        quiche_config_set_max_idle_timeout(config, 5000);
-        quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
+        quiche_config_set_max_idle_timeout(config, 5000000);
+        quiche_config_set_max_packet_size(config, MAX_PACKET_SIZE);
         quiche_config_set_initial_max_data(config, 10000000);
         quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
         quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);
         quiche_config_set_initial_max_streams_bidi(config, 100);
         quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
-        quiche_config_set_max_datagram_frame_size(config, 64000);
+        quiche_config_set_max_datagram_frame_size(config, 65535);
     }
 
     struct connections c;

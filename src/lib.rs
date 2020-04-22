@@ -1634,7 +1634,6 @@ impl Connection {
     ///     socket.send(&out[..write]).unwrap();
     /// }
     /// # Ok::<(), quiche::Error>(())
-    /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -2124,40 +2123,12 @@ impl Connection {
             pn
         );
 
-        qlog_with!(self.qlog_streamer, q, {
-            let qlog_pkt_hdr = qlog::PacketHeader::with_type(
-                hdr.ty.to_qlog(),
-                pn,
-                Some(payload_len as u64 + payload_offset as u64),
-                Some(payload_len as u64),
-                Some(hdr.version),
-                Some(&hdr.scid),
-                Some(&hdr.dcid),
-            );
-
-            let packet_sent_ev = qlog::event::Event::packet_sent_min(
-                hdr.ty.to_qlog(),
-                qlog_pkt_hdr,
-                Some(Vec::new()),
-            );
-
-            q.add_event(packet_sent_ev).ok();
-        });
-
         // Encode frames into the output packet.
         for frame in &frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;
-
-            qlog_with!(self.qlog_streamer, q, {
-                q.add_frame(frame.to_qlog(), false).ok();
-            });
         }
-
-        qlog_with!(self.qlog_streamer, q, {
-            q.finish_frames().ok();
-        });
 
         let aead = match self.pkt_num_spaces[epoch].crypto_seal {
             Some(ref v) => v,
@@ -2194,11 +2165,6 @@ impl Connection {
             &self.trace_id,
         );
 
-        qlog_with!(self.qlog_streamer, q, {
-            let ev = self.recovery.to_qlog();
-            q.add_event(ev).ok();
-        });
-
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
         self.sent_count += 1;
@@ -2224,6 +2190,7 @@ impl Connection {
 
         Ok(written)
     }
+
 
     /// Reads contiguous data from a stream into the provided slice.
     ///

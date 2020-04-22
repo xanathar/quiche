@@ -56,7 +56,7 @@
 #define BYTES_BEFORE_BENCHMARK_START (128L * (1L << 20))
 #define BYTES_BEFORE_BENCHMARK_TARGET (4L * (1L << 30))
 
-#define MAX_DATAGRAM_SIZE 64400
+#define MAX_PACKET_SIZE 16300
 
 #define DBG_FPRINTF(...)
 
@@ -85,7 +85,7 @@ static void debug_log(const char *line, void *argp) {
 }
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
-    static uint8_t out[MAX_DATAGRAM_SIZE];
+    static uint8_t out[MAX_PACKET_SIZE];
 
     while (1) {
         ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
@@ -179,7 +179,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     }
 
     if (quiche_conn_is_closed(conn_io->conn)) {
-        DBG_FPRINTF(stderr, "connection closed\n");
+        fprintf(stderr, "connection closed\n");
 
         ev_break(EV_A_ EVBREAK_ONE);
         return;
@@ -347,6 +347,10 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
 
     if (terminate) {
         return 1;
+    }
+
+    if (stats_total_bytes == 0 && !started) {
+        printf("Datagram benchmark ramping up...\n");
     }
 
     stats_total_bytes += dgram_len;
@@ -517,15 +521,15 @@ int main(int argc, char *argv[]) {
         quiche_config_set_application_protos(config,
             (uint8_t *) "\x0dtest-dgram-01", 14);
 
-        quiche_config_set_max_idle_timeout(config, 5000);
-        quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
+        quiche_config_set_max_idle_timeout(config, 5000000);
+        quiche_config_set_max_packet_size(config, MAX_PACKET_SIZE);
         quiche_config_set_initial_max_data(config, 10000000);
         quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
         quiche_config_set_initial_max_stream_data_uni(config, 1000000);
         quiche_config_set_initial_max_streams_bidi(config, 100);
         quiche_config_set_initial_max_streams_uni(config, 100);
         quiche_config_set_disable_active_migration(config, true);
-        quiche_config_set_max_datagram_frame_size(config, 64000);
+        quiche_config_set_max_datagram_frame_size(config, 65535);
         quiche_config_set_cc_algorithm(config, QUICHE_CC_NOCC);
 
         if (getenv("SSLKEYLOGFILE")) {
@@ -585,6 +589,8 @@ int main(int argc, char *argv[]) {
     }
 
     ev_loop(loop, 0);
+
+    printf("Exited main loop\n");
 
     freeaddrinfo(peer);
 
