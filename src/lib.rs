@@ -1706,8 +1706,6 @@ impl Connection {
             }
         }
 
-
-        // Space left in the packet
         let mut left = b.cap();
 
         // Use max_packet_size as sent by the peer, except during the handshake
@@ -1723,6 +1721,9 @@ impl Connection {
             1200
         };
 
+        // Limit output packet size to respect peer's max_packet_size limit.
+        left = cmp::min(left, max_pkt_len);
+
         // Limit output packet size by congestion window size.
         left = cmp::min(left, self.recovery.cwnd_available());
 
@@ -1731,13 +1732,6 @@ impl Connection {
         if !self.verified_peer_address && self.is_server {
             left = cmp::min(left, self.max_send_bytes);
         }
-
-        // Datagram extensions are not subject to max_packet_size limits,
-        // we count space left for datagrams separately
-        let mut dgram_left:usize = left;
-
-        // Limit output packet size to respect peer's max_packet_size limit.
-        left = cmp::min(left, max_pkt_len);
 
         let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -1779,16 +1773,9 @@ impl Connection {
 
         // Make sure we have enough space left for the header, the payload
         // length, the packet number and the AEAD overhead.
-        dgram_left = dgram_left
+        left = left
             .checked_sub(b.off() + pn_len + overhead)
             .ok_or(Error::Done)?;
-
-        // Same as above for non-datagram frames, but we don't return if
-        // space left for non-datagram frames is 0 (at least, not yet)  
-        left = match left.checked_sub(b.off() + pn_len + overhead) {
-            Some(n) => n,
-            None => 0,
-        };
 
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
@@ -1802,46 +1789,6 @@ impl Connection {
         let mut in_flight = false;
 
         let mut payload_len = 0;
-
-        // Create DATAGRAM frame.
-        // When an application sends an unreliable datagram over a QUIC
-        // connection, QUIC will generate a new DATAGRAM frame and send it in
-        // the first available packet. This frame SHOULD be sent as soon as
-        // possible, and MAY be coalesced with other frames.
-        if pkt_type == packet::Type::Short &&
-            dgram_left > frame::MAX_DGRAM_OVERHEAD &&
-            !is_closing
-        {
-            while let Some(len) = self.dgram_queue.peek_writable() {
-                // Make sure we can fit the data in the packet.
-                if dgram_left > frame::MAX_DGRAM_OVERHEAD + len {
-                    let data = match self.dgram_queue.pop_writable() {
-                        Some(v) => v,
-                        None => continue,
-                    };
-
-                    let frame = frame::Frame::Datagram { data };
-
-                    payload_len += frame.wire_len();
-                    dgram_left -= frame.wire_len();
-
-                    left = match left.checked_sub(frame.wire_len()) {
-                        Some(n) => n,
-                        None => 0,
-                    };
-
-                    frames.push(frame);
-
-                    ack_eliciting = true;
-                    in_flight = true;
-                } else {
-                    break;
-                }
-            }
-        } else if left == 0 {
-            // we cannot add datagrams, and we are zero len
-            return Err(Error::Done);
-        }
 
         // Create ACK frame.
         if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
@@ -2016,6 +1963,35 @@ impl Connection {
             }
         }
 
+        // Create DATAGRAM frame.
+        if pkt_type == packet::Type::Short &&
+            left > frame::MAX_DGRAM_OVERHEAD &&
+            !is_closing
+        {
+            while let Some(len) = self.dgram_queue.peek_writable() {
+                // Make sure we can fit the data in the packet.
+                if left > frame::MAX_DGRAM_OVERHEAD + len {
+                    let data = match self.dgram_queue.pop_writable() {
+                        Some(v) => v,
+
+                        None => continue,
+                    };
+
+                    let frame = frame::Frame::Datagram { data };
+
+                    payload_len += frame.wire_len();
+                    left -= frame.wire_len();
+
+                    frames.push(frame);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                } else {
+                    break;
+                }
+            }
+        }
+
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
             left > frame::MAX_STREAM_OVERHEAD &&
@@ -2148,12 +2124,40 @@ impl Connection {
             pn
         );
 
+        qlog_with!(self.qlog_streamer, q, {
+            let qlog_pkt_hdr = qlog::PacketHeader::with_type(
+                hdr.ty.to_qlog(),
+                pn,
+                Some(payload_len as u64 + payload_offset as u64),
+                Some(payload_len as u64),
+                Some(hdr.version),
+                Some(&hdr.scid),
+                Some(&hdr.dcid),
+            );
+
+            let packet_sent_ev = qlog::event::Event::packet_sent_min(
+                hdr.ty.to_qlog(),
+                qlog_pkt_hdr,
+                Some(Vec::new()),
+            );
+
+            q.add_event(packet_sent_ev).ok();
+        });
+
         // Encode frames into the output packet.
         for frame in &frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;
+
+            qlog_with!(self.qlog_streamer, q, {
+                q.add_frame(frame.to_qlog(), false).ok();
+            });
         }
+
+        qlog_with!(self.qlog_streamer, q, {
+            q.finish_frames().ok();
+        });
 
         let aead = match self.pkt_num_spaces[epoch].crypto_seal {
             Some(ref v) => v,
@@ -2189,6 +2193,11 @@ impl Connection {
             now,
             &self.trace_id,
         );
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = self.recovery.to_qlog();
+            q.add_event(ev).ok();
+        });
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
