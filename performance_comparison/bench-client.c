@@ -53,10 +53,23 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define BYTES_BEFORE_BENCHMARK_START (128L * (1L << 20))
-#define BYTES_BEFORE_BENCHMARK_TARGET (4L * (1L << 30))
+#define TEST_16K
 
-#define MAX_PACKET_SIZE 16300
+#ifdef TEST_16K
+    #define MAX_PACKET_SIZE 16300
+    #define DATAGRAM_SIZE 16000
+    #define STR_TEST_MODE "16K"
+    #define BYTES_BEFORE_BENCHMARK_START (128L * (1L << 20))
+    #define BYTES_BEFORE_BENCHMARK_TARGET (4L * (1L << 30))
+#else
+    #define MAX_PACKET_SIZE 1350
+    #define DATAGRAM_SIZE 1024
+    #define STR_TEST_MODE "1K"
+    #define BYTES_BEFORE_BENCHMARK_START (8L * (1L << 20))
+    #define BYTES_BEFORE_BENCHMARK_TARGET (256L * (1L << 20))
+#endif
+
+
 
 #define DBG_FPRINTF(...)
 
@@ -79,6 +92,7 @@ struct conn_io {
 };
 
 static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ssize_t dgram_len);
+static const char *test_mode_name;
 
 static void debug_log(const char *line, void *argp) {
     DBG_FPRINTF(stderr, "%s\n", line);
@@ -396,6 +410,16 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     printf("Total datasent : %zd bytes\n", stats_total_bytes);
     printf("--------------------------------------------------\n");
 
+    char filename[1024];
+    sprintf(filename, "results_%s_%s.csv", STR_TEST_MODE, test_mode_name);
+
+    FILE *results = fopen(filename, "a");
+    if (ftell(results) == 0) {
+        fprintf(results, "clock_time,cpu_time,bandwidth\n");
+    }
+    fprintf(results, "%f,%f,%f\n", time_mono_spent, time_cpu_spent, bandwidth);
+    fclose(results),
+
     terminate = 1;
     return 1;
 }
@@ -475,6 +499,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "op_mode invalid: must be 'copy', 'nocopy' or 'rawudp'");
         return -1;
     }
+
+    test_mode_name = cmdline_op_mode;
+
+    printf("Test mode is %s\n", STR_TEST_MODE);
 
     int sock = socket(peer->ai_family, SOCK_DGRAM, 0);
     if (sock < 0) {

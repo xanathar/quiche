@@ -45,8 +45,18 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_PACKET_SIZE 16300
-#define DATAGRAM_SIZE 16000
+#define TEST_16K
+
+#ifdef TEST_16K
+    #define MAX_PACKET_SIZE 16300
+    #define DATAGRAM_SIZE 16000
+    #define STR_TEST_MODE "16K"
+#else
+    #define MAX_PACKET_SIZE 1350
+    #define DATAGRAM_SIZE 1024
+    #define STR_TEST_MODE "1K"
+#endif
+
 
 #define MAX_TOKEN_LEN \
     sizeof("quiche") - 1 + \
@@ -586,6 +596,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "op_mode invalid: must be 'quiche' or 'rawudp'");
         return -1;
     }
+
+    printf("Test mode is %s\n", STR_TEST_MODE);
 
     int sock = socket(local->ai_family, SOCK_DGRAM, 0);
     if (sock < 0) {
