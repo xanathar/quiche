@@ -1980,7 +1980,7 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
-
+        let mut contains_dgrams = false;
         let mut payload_len = 0;
 
         // Create ACK frame.
@@ -2206,6 +2206,7 @@ impl Connection {
 
                     frames.push(frame);
 
+                    contains_dgrams = true;
                     ack_eliciting = true;
                     in_flight = true;
                 } else {
@@ -2413,6 +2414,8 @@ impl Connection {
             epoch,
             self.is_established(),
             now,
+            contains_dgrams,
+            self.dgram_queue.has_writable(),
             &self.trace_id,
         );
 
@@ -2909,9 +2912,7 @@ impl Connection {
 
         let data = stream::RangeBuf::from(buf, 0, true);
 
-        self.dgram_queue.push_writable(data)?;
-
-        Ok(())
+        self.dgram_queue.push_writable(data)
     }
 
     /// Gets the size of the largest Datagram frame supported by peer.
@@ -3260,7 +3261,7 @@ impl Connection {
         if self.is_established() &&
             (self.should_update_max_data() ||
                 self.blocked_limit.is_some() ||
-                !self.dgram_queue.empty_writable() ||
+                self.dgram_queue.has_writable() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||

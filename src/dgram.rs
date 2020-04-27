@@ -83,8 +83,8 @@ impl DatagramQueue {
         Some(data.len())
     }
 
-    pub fn empty_writable(&self) -> bool {
-        self.writable.is_empty()
+    pub fn has_writable(&self) -> bool {
+        !self.writable.is_empty()
     }
 
     pub fn pop_writable(&mut self) -> Option<stream::RangeBuf> {
