@@ -2954,10 +2954,10 @@ impl Connection {
     /// # let scid = [0xba; 16];
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// conn.datagram_send(b"hello")?;
-    /// conn.datagram_purge_outgoing(|d| d[0] == b'h');
+    /// conn.datagram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == 0 });
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn datagram_purge_outgoing(&mut self, f: fn(&[u8]) -> bool) {
+    pub fn datagram_purge_outgoing(&mut self, f: &dyn Fn(&[u8]) -> bool) {
         self.dgram_queue.purge_writable(f);
     }
 
@@ -6244,7 +6244,7 @@ mod tests {
         assert_eq!(pipe.client.datagram_send(b"ciao, mondo"), Ok(()));
         assert_eq!(pipe.client.datagram_send(b"hola, mundo"), Ok(()));
 
-        pipe.client.datagram_purge_outgoing(|d| -> bool { d[0] == b'c' });
+        pipe.client.datagram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == b'c' });
 
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
