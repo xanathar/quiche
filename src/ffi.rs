@@ -209,6 +209,27 @@ pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_datagram_frame_size(
+    config: &mut Config, v: u64
+) {
+    config.set_max_datagram_frame_size(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_datagram_recv_queue_size(
+    config: &mut Config, v: u64
+) {
+    config.set_datagram_recv_queue_size(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_datagram_send_queue_size(
+    config: &mut Config, v: u64
+) {
+    config.set_datagram_send_queue_size(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,
 ) {
@@ -667,4 +688,63 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
 #[no_mangle]
 pub extern fn quiche_conn_free(conn: *mut Connection) {
     unsafe { Box::from_raw(conn) };
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_datagram_send(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.datagram_send(buf) {
+        Ok(_) => buf_len as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_datagram_recv(
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
+) -> ssize_t {
+
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    let out_len = match conn.datagram_recv(out) {
+        Ok(v) => v,
+
+        Err(e) => return e.to_c(),
+    };
+
+    out_len as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_datagram_purge_outgoing(
+    conn: &mut Connection,
+    f: fn(*const u8, usize) -> bool,
+) {
+    conn.datagram_purge_outgoing(
+        &|d:&[u8]| -> bool {
+            let ptr : *const u8 = d.as_ptr();
+            let len : usize = d.len();
+
+            f(ptr, len)
+        }
+    );
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_peer_datagram_frame_size(
+    conn: &Connection,
+) -> u64 {
+    conn.peer_transport_params.max_datagram_frame_size
 }

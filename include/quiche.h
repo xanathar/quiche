@@ -161,6 +161,15 @@ void quiche_config_set_ack_delay_exponent(quiche_config *config, uint64_t v);
 // Sets the `max_ack_delay` transport parameter.
 void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 
+// Sets the `max_datagram_frame_size` transport parameter.
+void quiche_config_set_max_datagram_frame_size(quiche_config *config, uint64_t v);
+
+// Sets the maximum length of the datagrams frames receive queue.
+void quiche_config_set_datagram_recv_queue_size(quiche_config *config, uint64_t v);
+
+// Sets the maximum length of the datagrams frames send queue.
+void quiche_config_set_datagram_send_queue_size(quiche_config *config, uint64_t v);
+
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
@@ -235,6 +244,21 @@ ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
 // Writes data to a stream.
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin);
+
+// Reads a received datagram
+ssize_t quiche_conn_datagram_recv(quiche_conn *conn, uint8_t *buf,
+                                  size_t buf_len);
+
+// Sends a datagram
+ssize_t quiche_conn_datagram_send(quiche_conn *conn, const uint8_t *buf,
+                                  size_t buf_len);
+
+// Gets the size of the largest Datagram frame supported by peer.
+size_t quiche_conn_peer_datagram_frame_size(quiche_conn *conn);
+
+// Iterates over the outgoing queue and purges datagrams matching the predicate.
+void quiche_conn_datagram_purge_outgoing(quiche_conn *conn,
+                                         bool (*f)(uint8_t *, size_t));
 
 enum quiche_shutdown {
     QUICHE_SHUTDOWN_READ = 0,
