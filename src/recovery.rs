@@ -307,7 +307,7 @@ impl Recovery {
             self.detect_lost_packets(epoch, now, trace_id);
             self.set_loss_detection_timer(handshake_completed);
 
-            trace!("{} {:?}", trace_id, self);
+            println!("on_loss_detection_timeout1 : {} {:?}", trace_id, self);
             return;
         }
 
@@ -324,7 +324,7 @@ impl Recovery {
 
         self.set_loss_detection_timer(handshake_completed);
 
-        trace!("{} {:?}", trace_id, self);
+        println!("on_loss_detection_timeout2 : {} {:?}", trace_id, self);
     }
 
     pub fn on_pkt_num_space_discarded(
@@ -500,7 +500,7 @@ impl Recovery {
                 largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
             {
                 if unacked.in_flight {
-                    trace!(
+                    println!(
                         "{} packet {} lost on epoch {}",
                         trace_id,
                         unacked.pkt_num,

@@ -3546,7 +3546,8 @@ impl Connection {
                         // has not sent the max_datagram_frame_size transport
                         // parameter MUST terminate the connection with error
                         // PROTOCOL_VIOLATION
-                        trace!("received a datagram without max_datagram_frame_size; closing.");
+                        trace!("received a datagram without \
+                            max_datagram_frame_size; closing.");
                         return Err(Error::InvalidState);
                     },
                 };
@@ -3556,7 +3557,8 @@ impl Connection {
                     // strictly larger than the value it sent in its
                     // max_datagram_frame_size transport parameter MUST
                     // terminate the connection with error PROTOCOL_VIOLATION.
-                    trace!("attempt to send datagram larger than peer's max_datagram_frame_size");
+                    trace!("attempt to send datagram larger \
+                        than peer's max_datagram_frame_size");
                     return Err(Error::InvalidState);
                 }
 
