@@ -117,6 +117,8 @@ pub struct Recovery {
     congestion_recovery_start_time: Option<Instant>,
 
     cubic_state: cubic::State,
+
+    total_packet_lost: u64,
 }
 
 impl Recovery {
@@ -171,6 +173,8 @@ impl Recovery {
             cubic_state: cubic::State::default(),
 
             app_limited: false,
+
+            total_packet_lost: 0,
         }
     }
 
@@ -499,8 +503,10 @@ impl Recovery {
             if unacked.time_sent <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
             {
+                self.total_packet_lost += 1;
+
                 if unacked.in_flight {
-                    println!(
+                    trace!(
                         "{} packet {} lost on epoch {}",
                         trace_id,
                         unacked.pkt_num,
