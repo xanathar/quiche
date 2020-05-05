@@ -187,6 +187,11 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
 
+        // let dbg_frames = pkt.frames.clone();
+        // for dfr in dbg_frames {
+        //     println!("SENT FRAME : {:?}", dfr);
+        // }
+
         self.delivery_rate.on_packet_sent(&mut pkt, now);
 
         self.largest_sent_pkt[epoch] =
@@ -345,6 +350,8 @@ impl Recovery {
         self.sent[epoch].clear();
         self.lost[epoch].clear();
         self.acked[epoch].clear();
+
+        println!("!!! on_pkt_num_space_discarded !!!");
 
         self.time_of_last_sent_ack_eliciting_pkt[epoch] = None;
         self.loss_time[epoch] = None;
@@ -717,6 +724,12 @@ impl std::fmt::Debug for Recovery {
         write!(f, "cwnd={} ", self.congestion_window)?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "acked[0]_len={} ", self.acked[0].len())?;
+        write!(f, "sent[0]_len={} ", self.sent[0].len())?;
+        write!(f, "acked[1]_len={} ", self.acked[1].len())?;
+        write!(f, "sent[1]_len={} ", self.sent[1].len())?;
+        write!(f, "acked[2]_len={} ", self.acked[2].len())?;
+        write!(f, "sent[2]_len={} ", self.sent[2].len())?;
         write!(f, "{:?}", self.delivery_rate)?;
 
         Ok(())

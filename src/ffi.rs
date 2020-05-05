@@ -481,6 +481,11 @@ pub extern fn quiche_conn_send(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_print_debug(conn: &Connection) -> () {
+    conn.print_debug();
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool,

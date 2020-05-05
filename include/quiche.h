@@ -355,6 +355,7 @@ void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
+void quiche_conn_print_debug(quiche_conn *conn);
 
 
 // HTTP/3 API

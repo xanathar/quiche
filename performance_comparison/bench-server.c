@@ -75,6 +75,7 @@ struct connections {
 struct conn_io {
     ev_timer timer;
     ev_idle idle;
+    ev_timer report_timer;
 
     int sock;
 
@@ -95,6 +96,7 @@ static quiche_config *config = NULL;
 static struct connections *conns = NULL;
 
 static void timeout_cb(EV_P_ ev_timer *w, int revents);
+static void report_cb(EV_P_ ev_timer *w, int revents);
 
 static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents);
 
@@ -250,6 +252,10 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
 
     ev_init(&conn_io->timer, timeout_cb);
     conn_io->timer.data = conn_io;
+    ev_init(&conn_io->report_timer, report_cb);
+    conn_io->report_timer.data = conn_io;
+    conn_io->report_timer.repeat = 1.0;
+    ev_timer_again(ev_default_loop(0), &conn_io->report_timer);      
     ev_idle_init(&conn_io->idle, idle_cb);
     ev_idle_start(ev_default_loop(0), &conn_io->idle);
     conn_io->idle.data = conn_io;
@@ -440,6 +446,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         if (quiche_conn_is_established(conn_io->conn)) {
             uint64_t s = 0;
             const uint8_t dgram_start_command[] = "DGRAM-START";
+            const uint8_t dgram_ping_command[] = "DGRAM-PING";
 
             quiche_stream_iter *readable = quiche_conn_readable(conn_io->conn);
 
@@ -465,6 +472,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                         conn_io->last_dgram_sent = 0;
                         
                     DBG_FPRINTF(stderr, "received start of datagrams, sending data\n");
+                } else if (recv_len > sizeof(dgram_ping_command) && 
+                    !memcmp(buf, dgram_ping_command, 
+                            sizeof(dgram_ping_command) - 1)) {
+                    DBG_FPRINTF(stderr, "received ping...\n");
                 } else {
                     static const char *resp = "byez\n";
                     quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
@@ -472,7 +483,6 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                     DBG_FPRINTF(stderr, "received end of session, sending byez\n");
                 }
             }
-
 
             quiche_stream_iter_free(readable);
         }
@@ -578,6 +588,7 @@ static void free_conn_if_closed(struct ev_loop *loop, struct conn_io *conn_io) {
 
         HASH_DELETE(hh, conns->h, conn_io);
 
+        ev_timer_stop(loop, &conn_io->report_timer);
         ev_timer_stop(loop, &conn_io->timer);
         ev_idle_stop(loop, &conn_io->idle);
         quiche_conn_free(conn_io->conn);
@@ -596,6 +607,25 @@ static int32_t set_sock_buf(int sock, int buf, int32_t size) {
     buffer_size = 0;
     getsockopt(sock, SOL_SOCKET, buf, &buffer_size, &len);
     return buffer_size;
+}
+
+static void report_cb(EV_P_ ev_timer *w, int revents) {
+    static int report_count = 0;
+    static int last_time_last_dgram_sent = 0;
+    struct conn_io *conn_io = w->data;
+
+    int dgrams_sent = last_time_last_dgram_sent - conn_io->last_dgram_sent;
+
+    printf("\n-=-=-=-| REPORT #%03d |-=-=-=-\n", ++report_count);
+    printf("last_dgram_sent : %d\n", conn_io->last_dgram_sent);
+    printf("est. dgrams/sec : %d\n", dgrams_sent);
+    quiche_conn_print_debug(conn_io->conn);
+    printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n");
+
+    last_time_last_dgram_sent = conn_io->last_dgram_sent;
+
+    conn_io->report_timer.repeat = 1.0;
+    ev_timer_again(loop, &conn_io->report_timer);    
 }
 
 int main(int argc, char *argv[]) {

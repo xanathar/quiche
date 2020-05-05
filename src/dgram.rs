@@ -95,3 +95,12 @@ impl DatagramQueue {
         self.writable.retain(|d| !f(d));
     }
 }
+
+impl std::fmt::Debug for DatagramQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "recv={:?}/{:?}", self.readable.len(), self.datagram_recv_queue_size)?;
+        write!(f, " send={:?}/{:?}", self.writable.len(), self.datagram_send_queue_size)?;
+
+        Ok(())
+    }
+}

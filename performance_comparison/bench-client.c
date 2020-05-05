@@ -66,7 +66,7 @@
     #define DATAGRAM_SIZE 1024
     #define STR_TEST_MODE "1K"
     #define BYTES_BEFORE_BENCHMARK_START (8L * (1L << 20))
-    #define BYTES_BEFORE_BENCHMARK_TARGET (256L * (1L << 20))
+    #define BYTES_BEFORE_BENCHMARK_TARGET (1024L * (1L << 20))
 #endif
 
 
@@ -84,6 +84,7 @@ static OperationMode op_mode;
 
 struct conn_io {
     ev_timer timer;
+    ev_timer report_timer;
 
     int sock;
 
@@ -261,6 +262,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 } else {
                     DBG_FPRINTF(stderr, "sent DGRAM-STOP request\n");
                 }
+
+                exit(0);
             }
         } 
 
@@ -356,16 +359,17 @@ static void get_mono_time(struct timespec *ts)
     #endif
 }
 
-static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ssize_t dgram_len) {
-    static ssize_t stats_total_bytes = 0;
-    static struct timespec start_cpu_time, start_mono_time;
-    static int terminate = 0;
-    static int started = 0;
-    static ssize_t packet_size = 0;
+static ssize_t stats_total_bytes = 0;
+static struct timespec start_cpu_time, start_mono_time;
+static int terminate = 0;
+static int started = 0;
+static ssize_t packet_size = 0;
+static uint32_t last_packet_rcvd = 0;
 
+static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ssize_t dgram_len) {
     double time_cpu_spent, time_mono_spent, bandwidth;
     struct timespec stop_cpu_time, stop_mono_time;
-    uint32_t last_packet_expected, last_packet_rcvd, packet_loss_est;
+    uint32_t last_packet_expected, packet_loss_est;
 
     if (terminate) {
         return 1;
@@ -376,6 +380,7 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     }
 
     stats_total_bytes += dgram_len;
+    memcpy(&last_packet_rcvd, dgram_data, sizeof(uint32_t));
 
     if (!started) {
         if (stats_total_bytes < BYTES_BEFORE_BENCHMARK_START) {
@@ -405,8 +410,7 @@ static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ss
     time_mono_spent = timeval_diff_sec(&stop_mono_time, &start_mono_time);
     bandwidth = (((double)stats_total_bytes) / time_mono_spent) / ((double)(1 << 20));
 
-    last_packet_expected = (uint32_t)((BYTES_BEFORE_BENCHMARK_TARGET + BYTES_BEFORE_BENCHMARK_START) / packet_size);
-    memcpy(&last_packet_rcvd, dgram_data, sizeof(uint32_t));
+    last_packet_expected = (uint32_t)((BYTES_BEFORE_BENCHMARK_TARGET + BYTES_BEFORE_BENCHMARK_START) / packet_size) - 1;
     packet_loss_est = last_packet_rcvd - last_packet_expected;
 
     printf("--------------------------------------------------\n");
@@ -467,6 +471,44 @@ static int32_t set_sock_buf(int sock, int buf, int32_t size) {
     buffer_size = 0;
     getsockopt(sock, SOL_SOCKET, buf, &buffer_size, &len);
     return buffer_size;
+}
+
+static void report_cb(EV_P_ ev_timer *w, int revents) {
+    static int report_count = 0;
+    static ssize_t sent_last_time = 0;
+    static int zero_bw_count = 0;
+    struct conn_io *conn_io = w->data;
+
+    ssize_t bandwidth = (stats_total_bytes - sent_last_time) >> 20;
+
+    if (bandwidth == 0) {
+        zero_bw_count += 1;
+        if (zero_bw_count == 3) {
+            system("osascript -e 'display notification \"Attach debugger now\" with title \"QUIC Deadlock detected!!\"'");
+        }
+    }
+
+    printf("\n-=-=-=-| REPORT #%03d |-=-=-=-\n", ++report_count);
+    printf("stats_total_bytes : %zd\n", stats_total_bytes);
+    printf("est.bandwidth-last : %zd MB/s\n", (stats_total_bytes - sent_last_time) >> 20);
+    printf("last_packet_rcvd : %u\n", last_packet_rcvd);
+    quiche_conn_print_debug(conn_io->conn);
+    printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n");
+
+    sent_last_time = stats_total_bytes;
+
+    const static uint8_t r[] = "DGRAM-PING\r\n";
+    ssize_t res = quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true);
+    if (res < 0) {
+        DBG_FPRINTF(stderr, "failed to send DGRAM-PING request %zd\n", res);
+    } else {
+        DBG_FPRINTF(stderr, "sent DGRAM-PING request\n");
+    }    
+
+    flush_egress(loop, conn_io);
+
+    conn_io->report_timer.repeat = 1.0;
+    ev_timer_again(loop, &conn_io->report_timer);    
 }
 
 int main(int argc, char *argv[]) {
@@ -609,7 +651,11 @@ int main(int argc, char *argv[]) {
     } else {
         ev_io_init(&watcher, recv_cb, conn_io->sock, EV_READ);
         ev_init(&conn_io->timer, timeout_cb);
+        ev_init(&conn_io->report_timer, report_cb);
         conn_io->timer.data = conn_io;
+        conn_io->report_timer.data = conn_io;
+        conn_io->report_timer.repeat = 1.0;
+        ev_timer_again(loop, &conn_io->report_timer);        
     }
 
     ev_io_start(loop, &watcher);

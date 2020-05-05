@@ -1777,6 +1777,14 @@ impl Connection {
         Ok(read)
     }
 
+    /// Don't bother me
+    pub fn print_debug(&self) {
+        println!("dgram queue: {:?}", self.dgram_queue);
+        println!("Recovery: {:?}", self.recovery);
+        println!("Stats: {:?}", self.stats());
+    }
+
+
     /// Writes a single QUIC packet to be sent to the peer.
     ///
     /// On success the number of bytes written to the output buffer is
