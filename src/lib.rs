@@ -297,6 +297,9 @@ const PAYLOAD_MIN_LEN: usize = 4;
 // account for that.
 const PAYLOAD_MIN_LEN: usize = 20;
 
+// The maximum number of tracked packet number ranges that need to be acked.
+const MAX_ACK_RANGES: usize = 68;
+
 const MAX_AMPLIFICATION_FACTOR: usize = 3;
 
 /// A specialized [`Result`] type for quiche operations.
@@ -1062,6 +1065,7 @@ macro_rules! push_frame_to_pkt {
 
             true
         } else {
+            println!("Packet of type {:?} discarded because it's wire len is {}", $frame, $frame.wire_len());
             false
         }
     }};
@@ -1707,7 +1711,7 @@ impl Connection {
                     // Stop acknowledging packets less than or equal to the
                     // largest acknowledged in the sent ACK frame that, in
                     // turn, got acked.
-                    if let Some(largest_acked) = ranges.largest() {
+                    if let Some(largest_acked) = ranges.last() {
                         self.pkt_num_spaces[epoch]
                             .recv_pkt_need_ack
                             .remove_until(largest_acked);
@@ -1742,7 +1746,7 @@ impl Connection {
 
         // We only record the time of arrival of the largest packet number
         // that still needs to be acked, to be used for ACK delay calculation.
-        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.largest() < Some(pn) {
+        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.last() < Some(pn) {
             self.pkt_num_spaces[epoch].largest_rx_pkt_time = now;
         }
 
@@ -2403,6 +2407,8 @@ impl Connection {
             payload_offset,
             aead,
         )?;
+
+        frames.retain(|f| f.retransmittable_on_loss());
 
         let sent_pkt = recovery::Sent {
             pkt_num: pn,

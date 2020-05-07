@@ -28,7 +28,7 @@ bench-server: bench-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 $(LIB_DIR)/libquiche.a: $(shell find $(SOURCE_DIR) -type f -name '*.rs')
-	cd .. && cargo build --release --target-dir $(BUILD_DIR)
+	cd .. && cargo build --features qlog --release --target-dir $(BUILD_DIR)
 
 clean:
 	@$(RM) -rf bench-client bench-server build/

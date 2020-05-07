@@ -704,6 +704,13 @@ impl Frame {
         }
     }
 
+    pub fn retransmittable_on_loss(&self) -> bool {
+        match self {
+            Frame::Datagram { .. } => false,
+            _ => true,
+        }
+    }
+
     pub fn ack_eliciting(&self) -> bool {
         match self {
             Frame::Padding { .. } |
@@ -768,6 +775,9 @@ impl Frame {
                 data.fin(),
                 None,
             ),
+
+            Frame::Datagram { data } =>
+                qlog::QuicFrame::datagram(data.len().to_string()),
 
             Frame::MaxData { max } => qlog::QuicFrame::max_data(max.to_string()),
 
@@ -876,7 +886,8 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::ACK { ack_delay, ranges } => {
-                write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
+                //write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
+                write!(f, "ACK delay={} ", ack_delay)?;
             },
 
             Frame::ResetStream {

@@ -127,6 +127,20 @@ static void debug_log(const char *line, void *argp) {
 static ssize_t vtotal = 0;
 static int vtotalp = 0;
 
+static int qlog_fd;
+static void qlog_open(quiche_conn *conn) {
+//    char sbuf[800];
+//    sprintf(sbuf, "/temp/qlog/client_%u", time(NULL));
+//
+//    qlog_fd = open(sbuf, O_WRONLY | O_APPEND | O_CREAT, 0666);
+// 
+//    quiche_conn_set_qlog_fd(conn, qlog_fd, 
+//        "bench-client",
+//        "bench-client");
+}
+static void qlog_flush() {
+//    fsync(qlog_fd);
+}
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     static uint8_t out[MAX_PACKET_SIZE];
@@ -260,6 +274,8 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     ev_idle_start(ev_default_loop(0), &conn_io->idle);
     conn_io->idle.data = conn_io;
     conn_io->last_dgram_sent = (conn_count > 1) ? -99 : -1;
+
+    qlog_open(conn);
 
     DBG_FPRINTF(stderr, "new connection\n");
 
@@ -533,6 +549,7 @@ static void idle_cb(struct ev_loop *loop, ev_idle *w, int revents) {
         if (pkt_count == 0 && !stuck) {
             printf("Sender is probably STUCK\n"); 
             stuck = true;
+            qlog_flush();
         }
         if (pkt_count > 0 && stuck) {
             printf("Sender now UNSTUCK\n"); 
@@ -614,7 +631,7 @@ static void report_cb(EV_P_ ev_timer *w, int revents) {
     static int last_time_last_dgram_sent = 0;
     struct conn_io *conn_io = w->data;
 
-    int dgrams_sent = last_time_last_dgram_sent - conn_io->last_dgram_sent;
+    int dgrams_sent = conn_io->last_dgram_sent - last_time_last_dgram_sent;
 
     printf("\n-=-=-=-| REPORT #%03d |-=-=-=-\n", ++report_count);
     printf("last_dgram_sent : %d\n", conn_io->last_dgram_sent);

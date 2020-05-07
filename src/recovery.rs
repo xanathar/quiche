@@ -187,11 +187,6 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
 
-        // let dbg_frames = pkt.frames.clone();
-        // for dfr in dbg_frames {
-        //     println!("SENT FRAME : {:?}", dfr);
-        // }
-
         self.delivery_rate.on_packet_sent(&mut pkt, now);
 
         self.largest_sent_pkt[epoch] =
@@ -228,7 +223,7 @@ impl Recovery {
         epoch: packet::Epoch, handshake_completed: bool, now: Instant,
         trace_id: &str,
     ) -> Result<()> {
-        let largest_acked = ranges.largest().unwrap();
+        let largest_acked = ranges.last().unwrap();
 
         // If the largest packet number acked exceeds any packet number we have
         // sent, then the ACK is obviously invalid, so there's no need to

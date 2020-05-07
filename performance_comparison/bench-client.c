@@ -66,7 +66,7 @@
     #define DATAGRAM_SIZE 1024
     #define STR_TEST_MODE "1K"
     #define BYTES_BEFORE_BENCHMARK_START (8L * (1L << 20))
-    #define BYTES_BEFORE_BENCHMARK_TARGET (1024L * (1L << 20))
+    #define BYTES_BEFORE_BENCHMARK_TARGET (256000L * (1L << 20))
 #endif
 
 
@@ -93,6 +93,25 @@ struct conn_io {
 
 static int benchmark_handle_dgram(uint32_t datagram_seq, uint8_t *dgram_data, ssize_t dgram_len);
 static const char *test_mode_name;
+
+
+static int qlog_fd;
+static void qlog_open(quiche_conn *conn) {
+//    char sbuf[800];
+//    sprintf(sbuf, "/temp/qlog/client_%u.qlog", time(NULL));
+//
+//    qlog_fd = open(sbuf, O_WRONLY | O_APPEND | O_CREAT, 0666);
+// 
+//    quiche_conn_set_qlog_fd(conn, qlog_fd, 
+//        "bench-client",
+//        "bench-client");
+}
+static void qlog_flush() {
+    fsync(qlog_fd);
+}
+static void qlog_close() {
+    close(qlog_fd);
+}
 
 static void debug_log(const char *line, void *argp) {
     //if (strlen(line) > 25 && line[25] == '!') {
@@ -230,6 +249,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             DBG_FPRINTF(stderr, "failed to send DGRAM-START request\n");
             return;
         }
+
+//         qlog_flush();
+//         qlog_close();
+//         exit(0);
 
         DBG_FPRINTF(stderr, "sent DGRAM-START request\n");
 
@@ -498,11 +521,11 @@ static void report_cb(EV_P_ ev_timer *w, int revents) {
     sent_last_time = stats_total_bytes;
 
     const static uint8_t r[] = "DGRAM-PING\r\n";
-    ssize_t res = quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true);
+    ssize_t res = quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), false);
     if (res < 0) {
-        DBG_FPRINTF(stderr, "failed to send DGRAM-PING request %zd\n", res);
+        fprintf(stderr, "failed to send DGRAM-PING request %zd\n", res);
     } else {
-        DBG_FPRINTF(stderr, "sent DGRAM-PING request\n");
+        fprintf(stderr, "sent DGRAM-PING request\n");
     }    
 
     flush_egress(loop, conn_io);
@@ -631,6 +654,7 @@ int main(int argc, char *argv[]) {
             DBG_FPRINTF(stderr, "failed to create connection\n");
             return -1;
         }
+        qlog_open(conn);
     }
 
     struct conn_io *conn_io = malloc(sizeof(*conn_io));
@@ -677,6 +701,8 @@ int main(int argc, char *argv[]) {
     quiche_conn_free(conn);
 
     quiche_config_free(config);
+
+    qlog_close();
 
     return 0;
 }
