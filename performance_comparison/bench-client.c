@@ -97,14 +97,16 @@ static const char *test_mode_name;
 
 static int qlog_fd;
 static void qlog_open(quiche_conn *conn) {
-//    char sbuf[800];
-//    sprintf(sbuf, "/temp/qlog/client_%u.qlog", time(NULL));
-//
-//    qlog_fd = open(sbuf, O_WRONLY | O_APPEND | O_CREAT, 0666);
-// 
-//    quiche_conn_set_qlog_fd(conn, qlog_fd, 
-//        "bench-client",
-//        "bench-client");
+    char sbuf[800];
+    sprintf(sbuf, "/temp/qlog/client_%u.qlog", time(NULL));
+
+    quiche_conn_set_qlog(conn, sbuf, "bench-client", "bench-client");
+
+    //qlog_fd = open(sbuf, O_WRONLY | O_APPEND | O_CREAT, 0666);
+ 
+    //quiche_conn_set_qlog_fd(conn, qlog_fd, 
+    //    "bench-client",
+    //    "bench-client");
 }
 static void qlog_flush() {
     fsync(qlog_fd);
