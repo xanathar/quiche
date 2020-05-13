@@ -175,6 +175,15 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
+// Sets the `max_datagram_frame_size` transport parameter.
+void quiche_config_set_max_datagram_frame_size(quiche_config *config, uint64_t v);
+
+// Sets the maximum length of the datagrams frames receive queue.
+void quiche_config_set_dgram_recv_queue_len(quiche_config *config, size_t v);
+
+// Sets the maximum length of the datagrams frames send queue.
+void quiche_config_set_dgram_send_queue_len(quiche_config *config, size_t v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -330,6 +339,18 @@ typedef struct {
 
 // Collects and returns statistics about the connection.
 void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+
+// Reads a received datagram
+ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
+                               size_t buf_len);
+
+// Sends a datagram
+ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
+                               size_t buf_len);
+
+// Iterates over the outgoing queue and purges datagrams matching the predicate.
+void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
+                                      bool (*f)(uint8_t *, size_t));
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
