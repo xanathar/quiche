@@ -715,6 +715,13 @@ impl Frame {
         }
     }
 
+    pub fn retransmittable_on_loss(&self) -> bool {
+        match self {
+            Frame::Datagram { .. } => false,
+            _ => true,
+        }
+    }
+
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> qlog::QuicFrame {
         match self {

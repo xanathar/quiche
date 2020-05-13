@@ -2390,6 +2390,9 @@ impl Connection {
             aead,
         )?;
 
+        // Remove frames which are not retransmittable to minimize memory impact
+        frames.retain(|f| f.retransmittable_on_loss());
+
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
