@@ -1648,6 +1648,7 @@ pub enum QuicFrameTypeName {
     ConnectionClose,
     ApplicationClose,
     HandshakeDone,
+    Datagram,
     Unknown,
 }
 
@@ -1888,6 +1889,11 @@ pub enum QuicFrame {
         raw: Option<String>,
     },
 
+    Datagram {
+        frame_type: QuicFrameTypeName,
+        length: String,
+    },
+
     MaxData {
         frame_type: QuicFrameTypeName,
         maximum: String,
@@ -2041,6 +2047,13 @@ impl QuicFrame {
             length,
             fin,
             raw,
+        }
+    }
+
+    pub fn datagram(length: String) -> Self {
+        QuicFrame::Datagram {
+            frame_type: QuicFrameTypeName::Datagram,
+            length: length,
         }
     }
 
