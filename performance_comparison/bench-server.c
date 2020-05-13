@@ -736,7 +736,7 @@ int main(int argc, char *argv[]) {
         quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
         quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);
         quiche_config_set_initial_max_streams_bidi(config, 100);
-        quiche_config_set_cc_algorithm(config, QUICHE_CC_CUBIC);
+        quiche_config_set_cc_algorithm(config, QUICHE_CC_NONE);
         quiche_config_set_max_datagram_frame_size(config, 65535);
         quiche_config_set_dgram_send_queue_len(config, 1000);
     }
