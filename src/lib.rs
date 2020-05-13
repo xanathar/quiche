@@ -1978,6 +1978,8 @@ impl Connection {
 
         let mut payload_len = 0;
 
+        let mut more_data_pending = false;
+
         // Create ACK frame.
         if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
             let ack_delay =
@@ -2204,6 +2206,7 @@ impl Connection {
                     ack_eliciting = true;
                     in_flight = true;
                 } else {
+                    more_data_pending = true;
                     break;
                 }
             }
@@ -2404,6 +2407,7 @@ impl Connection {
             sent_pkt,
             epoch,
             self.is_established(),
+            more_data_pending,
             now,
             &self.trace_id,
         );
