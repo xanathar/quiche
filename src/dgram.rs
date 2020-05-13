@@ -29,25 +29,31 @@ use std::collections::VecDeque;
 use crate::Error;
 use crate::Result;
 
-const MAX_FRAME_COUNT: usize = 1000;
-
 /// Keeps track of Datagram frames.
 #[derive(Default)]
 pub struct DatagramQueue {
     readable: VecDeque<Vec<u8>>,
     writable: VecDeque<Vec<u8>>,
+    readable_len : usize,
+    writable_len : usize,
 }
 
 impl DatagramQueue {
-    pub fn new() -> Self {
+    pub fn new(readable_len : usize,
+        writable_len : usize,
+    ) -> Self {
         DatagramQueue {
             readable: VecDeque::new(),
             writable: VecDeque::new(),
+            readable_len,
+            writable_len,
         }
     }
 
-    fn push(queue: &mut VecDeque<Vec<u8>>, data: &[u8]) -> Result<()> {
-        if queue.len() == MAX_FRAME_COUNT {
+    fn push(queue: &mut VecDeque<Vec<u8>>,
+        data: &[u8], queue_size: usize,
+    ) -> Result<()> {
+        if queue.len() == queue_size {
             return Err(Error::Done);
         }
 
@@ -78,7 +84,7 @@ impl DatagramQueue {
     }
 
     pub fn push_readable(&mut self, data: &[u8]) -> Result<()> {
-        DatagramQueue::push(&mut self.readable, data)
+        DatagramQueue::push(&mut self.readable, data, self.readable_len)
     }
 
     #[allow(dead_code)]
@@ -91,7 +97,7 @@ impl DatagramQueue {
     }
 
     pub fn push_writable(&mut self, data: &[u8]) -> Result<()> {
-        DatagramQueue::push(&mut self.writable, data)
+        DatagramQueue::push(&mut self.writable, data, self.writable_len)
     }
 
     pub fn peek_writable(&self) -> Option<usize> {
@@ -104,5 +110,9 @@ impl DatagramQueue {
 
     pub fn pop_writable(&mut self, buf: &mut [u8]) -> Result<usize> {
         DatagramQueue::pop(&mut self.writable, buf)
+    }
+
+    pub fn purge_writable(&mut self, f: &dyn Fn(&[u8]) -> bool) {
+        self.writable.retain(|d| !f(d));
     }
 }

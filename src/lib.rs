@@ -296,6 +296,9 @@ const PAYLOAD_MIN_LEN: usize = 20;
 
 const MAX_AMPLIFICATION_FACTOR: usize = 3;
 
+// The default length of the datagram frames queue
+const DEFAULT_DGRAM_QUEUE_LEN: usize = 1000;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -420,6 +423,9 @@ pub struct Config {
     cc_algorithm: CongestionControlAlgorithm,
 
     hystart: bool,
+
+    dgram_recv_queue_len : usize,
+    dgram_send_queue_len : usize,
 }
 
 impl Config {
@@ -442,6 +448,8 @@ impl Config {
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
+            dgram_recv_queue_len : DEFAULT_DGRAM_QUEUE_LEN,
+            dgram_send_queue_len : DEFAULT_DGRAM_QUEUE_LEN,
         })
     }
 
@@ -726,6 +734,20 @@ impl Config {
     /// The default is `0`.
     pub fn set_max_datagram_frame_size(&mut self, v: u64) {
         self.local_transport_params.max_datagram_frame_size = v;
+    }
+
+    /// Sets the maximum length of the datagrams frames send queue.
+    ///
+    /// The default is `1000`.
+    pub fn set_dgram_send_queue_len(&mut self, v: usize) {
+        self.dgram_send_queue_len = v;
+    }
+
+    /// Sets the maximum length of the datagrams frames receive queue.
+    ///
+    /// The default is `1000`.
+    pub fn set_dgram_recv_queue_len(&mut self, v: usize) {
+        self.dgram_recv_queue_len = v;
     }
 
     /// Configures whether to enable HyStart++.
@@ -1171,8 +1193,10 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
-            dgram_queue: dgram::DatagramQueue::new(),
-        });
+            dgram_queue: dgram::DatagramQueue::new(
+                config.dgram_recv_queue_len,
+                config.dgram_send_queue_len),
+            });
 
         if let Some(odcid) = odcid {
             conn.local_transport_params.original_connection_id =
@@ -2867,6 +2891,25 @@ impl Connection {
         self.dgram_queue.push_writable(buf)?;
 
         Ok(())
+    }
+
+    /// Iterates over the outgoing queue and purges datagrams
+    /// matching the predicate.
+    ///
+    /// In other words, remove all elements `e` such that `f(&e)` returns true.
+    ///
+    /// ## Examples:
+    /// ```no_run
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// conn.dgram_send(b"hello")?;
+    /// conn.dgram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == 0 });
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_purge_outgoing(&mut self, f: &dyn Fn(&[u8]) -> bool) {
+        self.dgram_queue.purge_writable(f);
     }
 
     /// Returns the amount of time until the next timeout event.
@@ -5954,6 +5997,173 @@ mod tests {
         assert_eq!(iter.next(), Some(&frame::Frame::Padding { len: 1 }));
 
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn dgram_single_datagram() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_recv_queue_len(10);
+        config.set_dgram_send_queue_len(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Err(Error::Done));
+    }
+
+    #[test]
+    fn dgram_multiple_datagrams() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_recv_queue_len(10);
+        config.set_dgram_send_queue_len(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
+
+        pipe.client.dgram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == b'c' });
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'o');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
+    }
+
+    #[test]
+    fn dgram_send_queue_overflow() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_recv_queue_len(10);
+        config.set_dgram_send_queue_len(2);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(
+            pipe.client.dgram_send(b"hola, mundo"),
+            Err(Error::Done));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
+    }
+
+    #[test]
+    fn dgram_recv_queue_overflow() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_recv_queue_len(2);
+        config.set_dgram_send_queue_len(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
     }
 }
 
