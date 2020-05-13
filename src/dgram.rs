@@ -112,7 +112,7 @@ impl DatagramQueue {
         DatagramQueue::pop(&mut self.writable, buf)
     }
 
-    pub fn purge_writable(&mut self, f: &dyn Fn(&[u8]) -> bool) {
+    pub fn purge_writable<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.writable.retain(|d| !f(d));
     }
 }

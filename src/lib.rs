@@ -2908,7 +2908,7 @@ impl Connection {
     /// conn.dgram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == 0 });
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn dgram_purge_outgoing(&mut self, f: &dyn Fn(&[u8]) -> bool) {
+    pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.dgram_queue.purge_writable(f);
     }
 
@@ -6060,7 +6060,7 @@ mod tests {
         assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
         assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
 
-        pipe.client.dgram_purge_outgoing(&|d:&[u8]| -> bool { d[0] == b'c' });
+        pipe.client.dgram_purge_outgoing(|d:&[u8]| -> bool { d[0] == b'c' });
 
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
