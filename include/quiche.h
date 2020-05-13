@@ -355,6 +355,9 @@ void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
+// Gets the size of the largest datagram frame supported by peer. If the peer
+// has not advertised datagram frame support, QUICHE_ERR_DONE is returned.
+ssize_t quiche_conn_peer_datagram_frame_size(quiche_conn *conn);
 
 // HTTP/3 API
 //
