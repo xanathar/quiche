@@ -51,12 +51,14 @@ fn collapse_cwnd(_r: &mut Recovery) {
 
 fn on_packet_sent(r: &mut Recovery, _sent_bytes: usize, _now: Instant) {
     r.congestion_window = usize::max_value();
+    r.bytes_in_flight += sent_bytes;
 }
 
 fn on_packet_acked(
     r: &mut Recovery, _epoch: packet::Epoch, _packet: &Sent, _now: Instant,
 ) {
     r.congestion_window = usize::max_value();
+    r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 }
 
 fn congestion_event(
