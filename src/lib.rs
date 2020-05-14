@@ -2438,6 +2438,12 @@ impl Connection {
 
         self.sent_count += 1;
 
+        if self.dgram_queue.writable().pending_bytes() >
+            self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
+
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_epoch_state(packet::EPOCH_INITIAL);
