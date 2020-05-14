@@ -1993,8 +1993,6 @@ impl Connection {
 
         let mut payload_len = 0;
 
-        let mut more_data_pending = false;
-
         // Create ACK frame.
         if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
             let ack_delay =
@@ -2221,7 +2219,6 @@ impl Connection {
                     ack_eliciting = true;
                     in_flight = true;
                 } else {
-                    more_data_pending = true;
                     break;
                 }
             }
@@ -2428,7 +2425,6 @@ impl Connection {
             sent_pkt,
             epoch,
             self.is_established(),
-            more_data_pending,
             now,
             &self.trace_id,
         );
@@ -6398,43 +6394,6 @@ mod tests {
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new packet header because there is no room by cwnd.
-        // app_limited should be false because we can't send more by cwnd.
-        assert_eq!(pipe.server.recovery.app_limited(), false);
-    }
-
-    #[test]
-    fn app_limited_false_no_header() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(b"\x06proto1\x06proto2")
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_packet_size(1406);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-
-        assert_eq!(pipe.handshake(&mut buf), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
-
-        // Server sends stream data bigger than cwnd.
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
-
-        // We can't create a new frame because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
         assert_eq!(pipe.server.recovery.app_limited(), false);
     }
