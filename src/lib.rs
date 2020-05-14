@@ -2920,6 +2920,12 @@ impl Connection {
 
         self.dgram_queue.writable_mut().push(buf)?;
 
+        if self.dgram_queue.writable().pending_bytes() >
+            self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
+
         Ok(())
     }
 
