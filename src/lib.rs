@@ -2199,11 +2199,11 @@ impl Connection {
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing
         {
-            while let Some(len) = self.dgram_queue.peek_writable() {
+            while let Some(len) = self.dgram_queue.writable().peek() {
                 // Make sure we can fit the data in the packet.
                 if left > frame::MAX_DGRAM_OVERHEAD + len {
                     let mut buf = vec![0; len];
-                    match self.dgram_queue.pop_writable(&mut buf) {
+                    match self.dgram_queue.writable_mut().pop(&mut buf) {
                         Ok(v) => v,
 
                         Err(_) => continue,
@@ -2871,7 +2871,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        Ok(self.dgram_queue.pop_readable(buf)?)
+        Ok(self.dgram_queue.readable_mut().pop(buf)?)
     }
 
     /// Send data in a Datagram frame.
@@ -2918,7 +2918,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        self.dgram_queue.push_writable(buf)?;
+        self.dgram_queue.writable_mut().push(buf)?;
 
         Ok(())
     }
@@ -2940,7 +2940,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
-        self.dgram_queue.purge_writable(f);
+        self.dgram_queue.writable_mut().purge(f);
     }
     /// Gets the size of the largest Datagram frame supported by peer.
     ///
@@ -3240,7 +3240,7 @@ impl Connection {
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_update_max_data() ||
                 self.blocked_limit.is_some() ||
-                self.dgram_queue.has_writable() ||
+                self.dgram_queue.writable().has_pending() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -3566,7 +3566,7 @@ impl Connection {
 
                 // If recv queue is full, best option is probably to just
                 // lose the packet. Datagrams have no flow control.
-                match self.dgram_queue.push_readable(&data) {
+                match self.dgram_queue.readable_mut().push(&data) {
                     Ok(()) | Err(Error::Done) => { },
                     err => { return err; },
                 }

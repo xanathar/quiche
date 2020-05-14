@@ -32,41 +32,42 @@ use crate::Result;
 /// Keeps track of Datagram frames.
 #[derive(Default)]
 pub struct DatagramQueue {
-    readable: VecDeque<Vec<u8>>,
-    writable: VecDeque<Vec<u8>>,
-    readable_len : usize,
-    writable_len : usize,
+    readable: DatagramVecQueue,
+    writable: DatagramVecQueue,
 }
 
-impl DatagramQueue {
-    pub fn new(readable_len : usize,
-        writable_len : usize,
-    ) -> Self {
-        DatagramQueue {
-            readable: VecDeque::new(),
-            writable: VecDeque::new(),
-            readable_len,
-            writable_len,
+#[derive(Default)]
+pub struct DatagramVecQueue {
+    queue: VecDeque<Vec<u8>>,
+    queue_max_len: usize,
+    queue_bytes_size: usize,
+}
+
+impl DatagramVecQueue {
+    fn new(queue_max_len: usize) -> Self {
+        DatagramVecQueue {
+            queue: VecDeque::new(),
+            queue_bytes_size: 0,
+            queue_max_len,
         }
     }
 
-    fn push(queue: &mut VecDeque<Vec<u8>>,
-        data: &[u8], queue_size: usize,
-    ) -> Result<()> {
-        if queue.len() == queue_size {
+    pub fn push(&mut self, data: &[u8]) -> Result<()> {
+        if self.queue.len() == self.queue_max_len {
             return Err(Error::Done);
         }
 
-        queue.push_back(data.to_vec());
+        self.queue.push_back(data.to_vec());
+        self.queue_bytes_size += data.len();
         Ok(())
     }
 
-    fn peek(queue: &VecDeque<Vec<u8>>) -> Option<usize> {
-        queue.front().map(|d| d.len())
+    pub fn peek(&self) -> Option<usize> {
+        self.queue.front().map(|d| d.len())
     }
 
-    fn pop(queue: &mut VecDeque<Vec<u8>>, buf: &mut [u8]) -> Result<usize> {
-        match queue.front() {
+    pub fn pop(&mut self, buf: &mut [u8]) -> Result<usize> {
+        match self.queue.front() {
             Some(d) =>
                 if d.len() > buf.len() {
                     return Err(Error::BufferTooShort);
@@ -75,44 +76,49 @@ impl DatagramQueue {
             None => return Err(Error::Done),
         }
 
-        if let Some(d) = queue.pop_front() {
+        if let Some(d) = self.queue.pop_front() {
             buf[..d.len()].copy_from_slice(&d);
+            self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());
             return Ok(d.len());
         }
 
         Err(Error::Done)
     }
 
-    pub fn push_readable(&mut self, data: &[u8]) -> Result<()> {
-        DatagramQueue::push(&mut self.readable, data, self.readable_len)
+    pub fn has_pending(&self) -> bool {
+        !self.queue.is_empty()
     }
 
-    #[allow(dead_code)]
-    pub fn peek_readable(&self) -> Option<usize> {
-        DatagramQueue::peek(&self.readable)
+    pub fn pending_bytes(&self) -> usize {
+        self.queue_bytes_size
     }
 
-    pub fn pop_readable(&mut self, buf: &mut [u8]) -> Result<usize> {
-        DatagramQueue::pop(&mut self.readable, buf)
+    pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
+        self.queue.retain(|d| !f(d));
+        self.queue_bytes_size = self.queue.iter()
+                                .fold(0, |total, d| total + d.len());
+    }
+}
+
+impl DatagramQueue {
+    pub fn new(readable_max_len : usize,
+        writable_max_len : usize,
+    ) -> Self {
+        DatagramQueue {
+            readable: DatagramVecQueue::new(readable_max_len),
+            writable: DatagramVecQueue::new(writable_max_len),
+        }
     }
 
-    pub fn push_writable(&mut self, data: &[u8]) -> Result<()> {
-        DatagramQueue::push(&mut self.writable, data, self.writable_len)
+    pub fn readable_mut(&mut self) -> &mut DatagramVecQueue {
+        &mut self.readable
     }
 
-    pub fn peek_writable(&self) -> Option<usize> {
-        DatagramQueue::peek(&self.writable)
+    pub fn writable_mut(&mut self) -> &mut DatagramVecQueue {
+        &mut self.writable
     }
 
-    pub fn has_writable(&self) -> bool {
-        !&self.writable.is_empty()
-    }
-
-    pub fn pop_writable(&mut self, buf: &mut [u8]) -> Result<usize> {
-        DatagramQueue::pop(&mut self.writable, buf)
-    }
-
-    pub fn purge_writable<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
-        self.writable.retain(|d| !f(d));
+    pub fn writable(&self) -> &DatagramVecQueue {
+        &self.writable
     }
 }

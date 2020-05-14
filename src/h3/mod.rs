@@ -812,7 +812,7 @@ impl Connection {
         b.put_varint(flow_id)?;
         b.put_bytes(buf)?;
 
-        conn.dgram_queue.push_writable(&d)?;
+        conn.dgram_queue.writable_mut().push(&d)?;
 
         Ok(())
     }
