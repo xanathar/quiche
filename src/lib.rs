@@ -2413,6 +2413,12 @@ impl Connection {
 
         self.sent_count += 1;
 
+        if self.dgram_writable_queue.pending_bytes() >
+            self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
+
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_epoch_state(packet::EPOCH_INITIAL);
@@ -2885,6 +2891,12 @@ impl Connection {
         }
 
         self.dgram_writable_queue.push(buf)?;
+
+        if self.dgram_writable_queue.pending_bytes() >
+            self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
 
         Ok(())
     }
@@ -6151,22 +6163,10 @@ mod tests {
             assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
         }
 
-        println!("After send/recv 0 : queued={} app_limited={}",
-        pipe.client.dgram_writable_queue.pending_bytes(),
-        pipe.client.recovery.app_limited());
-
         assert!(!pipe.client.recovery.app_limited());
         assert_eq!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
 
-        println!("After send/recv 1 : queued={} app_limited={}",
-            pipe.client.dgram_writable_queue.pending_bytes(),
-            pipe.client.recovery.app_limited());
-
         let len = pipe.client.send(&mut buf).unwrap();
-
-        println!("After send/recv 2 : queued={} app_limited={}",
-            pipe.client.dgram_writable_queue.pending_bytes(),
-            pipe.client.recovery.app_limited());
 
         assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 0);
         assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
@@ -6174,10 +6174,6 @@ mod tests {
 
         testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
         testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
-
-        println!("After send/recv 3 : queued={} app_limited={}",
-            pipe.client.dgram_writable_queue.pending_bytes(),
-            pipe.client.recovery.app_limited());
 
         assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 0);
         assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
