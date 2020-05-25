@@ -6122,6 +6122,68 @@ mod tests {
         // app_limited should be false because we can't send more by cwnd.
         assert_eq!(pipe.server.recovery.app_limited(), false);
     }
+
+    #[test]
+    fn dgram_send_app_limited() {
+        let mut buf = [0; 65535];
+        let send_buf = [0xcf; 1000];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_datagram_frame_size(65535);
+        config.set_max_packet_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        for _ in 0..1000 {
+            assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
+        }
+
+        println!("After send/recv 0 : queued={} app_limited={}",
+        pipe.client.dgram_writable_queue.pending_bytes(),
+        pipe.client.recovery.app_limited());
+
+        assert!(!pipe.client.recovery.app_limited());
+        assert_eq!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
+
+        println!("After send/recv 1 : queued={} app_limited={}",
+            pipe.client.dgram_writable_queue.pending_bytes(),
+            pipe.client.recovery.app_limited());
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        println!("After send/recv 2 : queued={} app_limited={}",
+            pipe.client.dgram_writable_queue.pending_bytes(),
+            pipe.client.recovery.app_limited());
+
+        assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
+        assert!(!pipe.client.recovery.app_limited());
+
+        testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        println!("After send/recv 3 : queued={} app_limited={}",
+            pipe.client.dgram_writable_queue.pending_bytes(),
+            pipe.client.recovery.app_limited());
+
+        assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_writable_queue.pending_bytes(), 1_000_000);
+
+        assert!(!pipe.client.recovery.app_limited());
+    }
 }
 
 pub use crate::packet::Header;
