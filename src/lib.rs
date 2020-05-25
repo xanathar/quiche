@@ -889,8 +889,9 @@ pub struct Connection {
     #[cfg(feature = "qlog")]
     qlogged_peer_params: bool,
 
-    /// Datagram queue.
-    dgram_queue: dgram::DatagramQueue,
+    /// Datagram queues.
+    dgram_readable_queue: dgram::DatagramQueue,
+    dgram_writable_queue: dgram::DatagramQueue,
 }
 
 /// Creates a new server-side connection.
@@ -1195,7 +1196,8 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
-            dgram_queue: dgram::DatagramQueue::new(),
+            dgram_readable_queue: dgram::DatagramQueue::new(),
+            dgram_writable_queue: dgram::DatagramQueue::new(),
         });
 
         if let Some(odcid) = odcid {
@@ -2285,11 +2287,11 @@ impl Connection {
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing
         {
-            while let Some(len) = self.dgram_queue.peek_writable() {
+            while let Some(len) = self.dgram_writable_queue.peek() {
                 // Make sure we can fit the data in the packet.
                 if left > frame::MAX_DGRAM_OVERHEAD + len {
                     let mut buf = vec![0; len];
-                    match self.dgram_queue.pop_writable(&mut buf) {
+                    match self.dgram_writable_queue.pop(&mut buf) {
                         Ok(v) => v,
 
                         Err(_) => continue,
@@ -2960,7 +2962,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let len = self.dgram_queue.pop_readable(buf)?;
+        let len = self.dgram_readable_queue.pop(buf)?;
 
         if len > self.local_transport_params.max_datagram_frame_size as usize {
             trace!("received a DATAGRAM larger than max_datagram_frame_size");
@@ -2998,7 +3000,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        self.dgram_queue.push_writable(buf)?;
+        self.dgram_writable_queue.push(buf)?;
 
         Ok(())
     }
@@ -3291,7 +3293,7 @@ impl Connection {
         if (self.is_established() || self.is_in_early_data()) &&
             (self.almost_full ||
                 self.blocked_limit.is_some() ||
-                self.dgram_queue.has_writable() ||
+                self.dgram_writable_queue.has_pending() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -3648,7 +3650,7 @@ impl Connection {
             },
 
             frame::Frame::Datagram { data } => {
-                self.dgram_queue.push_readable(&data)?;
+                self.dgram_readable_queue.push(&data)?;
             },
         }
 
