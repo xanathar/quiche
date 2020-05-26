@@ -259,6 +259,13 @@ pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_dgram_frames_supported(
+    config: &mut Config, v: bool,
+) {
+    config.set_dgram_frames_supported(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }
@@ -667,6 +674,15 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.rtt = stats.rtt.as_nanos() as u64;
     out.cwnd = stats.cwnd;
     out.delivery_rate = stats.delivery_rate;
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
+    match conn.dgram_max_writable_len() {
+        None => Error::Done.to_c(),
+
+        Some(v) => v as ssize_t,
+    }
 }
 
 #[no_mangle]
