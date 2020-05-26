@@ -822,7 +822,7 @@ impl Connection {
         b.put_varint(flow_id)?;
         b.put_bytes(buf)?;
 
-        conn.dgram_write_queue.push(&d)?;
+        conn.dgram_send_queue.push(&d)?;
 
         Ok(())
     }

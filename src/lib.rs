@@ -890,8 +890,8 @@ pub struct Connection {
     qlogged_peer_params: bool,
 
     /// Datagram queues.
-    dgram_read_queue: dgram::DatagramQueue,
-    dgram_write_queue: dgram::DatagramQueue,
+    dgram_recv_queue: dgram::DatagramQueue,
+    dgram_send_queue: dgram::DatagramQueue,
 }
 
 /// Creates a new server-side connection.
@@ -1196,8 +1196,8 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
-            dgram_read_queue: dgram::DatagramQueue::new(),
-            dgram_write_queue: dgram::DatagramQueue::new(),
+            dgram_recv_queue: dgram::DatagramQueue::new(),
+            dgram_send_queue: dgram::DatagramQueue::new(),
         });
 
         if let Some(odcid) = odcid {
@@ -2287,11 +2287,11 @@ impl Connection {
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing
         {
-            while let Some(len) = self.dgram_write_queue.peek() {
+            while let Some(len) = self.dgram_send_queue.peek() {
                 // Make sure we can fit the data in the packet.
                 if left > frame::MAX_DGRAM_OVERHEAD + len {
                     let mut buf = vec![0; len];
-                    match self.dgram_write_queue.pop(&mut buf) {
+                    match self.dgram_send_queue.pop(&mut buf) {
                         Ok(v) => v,
 
                         Err(_) => continue,
@@ -2525,7 +2525,7 @@ impl Connection {
 
         self.sent_count += 1;
 
-        if self.dgram_write_queue.pending_bytes() >
+        if self.dgram_send_queue.pending_bytes() >
             self.recovery.cwnd_available()
         {
             self.recovery.update_app_limited(false);
@@ -2968,7 +2968,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let len = self.dgram_read_queue.pop(buf)?;
+        let len = self.dgram_recv_queue.pop(buf)?;
 
         if len > self.local_transport_params.max_datagram_frame_size as usize {
             trace!("received a DATAGRAM larger than max_datagram_frame_size");
@@ -3006,9 +3006,9 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        self.dgram_write_queue.push(buf)?;
+        self.dgram_send_queue.push(buf)?;
 
-        if self.dgram_write_queue.pending_bytes() >
+        if self.dgram_send_queue.pending_bytes() >
             self.recovery.cwnd_available()
         {
             self.recovery.update_app_limited(false);
@@ -3305,7 +3305,7 @@ impl Connection {
         if (self.is_established() || self.is_in_early_data()) &&
             (self.almost_full ||
                 self.blocked_limit.is_some() ||
-                self.dgram_write_queue.has_pending() ||
+                self.dgram_send_queue.has_pending() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -3662,7 +3662,7 @@ impl Connection {
             },
 
             frame::Frame::Datagram { data } => {
-                self.dgram_read_queue.push(&data)?;
+                self.dgram_recv_queue.push(&data)?;
             },
         }
 
@@ -6641,19 +6641,19 @@ mod tests {
         }
 
         assert!(!pipe.client.recovery.app_limited());
-        assert_eq!(pipe.client.dgram_write_queue.pending_bytes(), 1_000_000);
+        assert_eq!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
 
         let len = pipe.client.send(&mut buf).unwrap();
 
-        assert_ne!(pipe.client.dgram_write_queue.pending_bytes(), 0);
-        assert_ne!(pipe.client.dgram_write_queue.pending_bytes(), 1_000_000);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
         assert!(!pipe.client.recovery.app_limited());
 
         testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
         testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert_ne!(pipe.client.dgram_write_queue.pending_bytes(), 0);
-        assert_ne!(pipe.client.dgram_write_queue.pending_bytes(), 1_000_000);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
 
         assert!(!pipe.client.recovery.app_limited());
     }
