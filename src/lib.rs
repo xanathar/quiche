@@ -731,10 +731,11 @@ impl Config {
     ///
     /// The default is `false`.
     pub fn set_dgram_frames_supported(&mut self, supported: bool) {
-        self.local_transport_params.max_datagram_frame_size = match supported {
-            true => Some(MAX_DGRAM_FRAME_SIZE),
-            false => None
-        }
+        self.local_transport_params.max_datagram_frame_size = if supported {
+            Some(MAX_DGRAM_FRAME_SIZE)
+        } else {
+            None
+        };
     }
 
     /// Configures whether to enable HyStart++.
