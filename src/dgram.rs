@@ -41,11 +41,11 @@ pub struct DatagramQueue {
 }
 
 impl DatagramQueue {
-    pub fn new() -> Self {
+    pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
             queue: VecDeque::new(),
             queue_bytes_size: 0,
-            queue_max_len: DEFAULT_DGRAM_QUEUE_SIZE,
+            queue_max_len,
         }
     }
 
