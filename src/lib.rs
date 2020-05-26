@@ -296,6 +296,9 @@ const PAYLOAD_MIN_LEN: usize = 20;
 
 const MAX_AMPLIFICATION_FACTOR: usize = 3;
 
+// The default length of datagram-frames queues if none is specified in config.
+const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -420,6 +423,9 @@ pub struct Config {
     cc_algorithm: CongestionControlAlgorithm,
 
     hystart: bool,
+
+    dgram_recv_max_queue_len: usize,
+    dgram_send_max_queue_len: usize,
 }
 
 impl Config {
@@ -442,6 +448,8 @@ impl Config {
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
+            dgram_recv_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
+            dgram_send_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
         })
     }
 
@@ -733,6 +741,20 @@ impl Config {
     /// The default value is `true`.
     pub fn enable_hystart(&mut self, v: bool) {
         self.hystart = v;
+    }
+
+    /// Sets the maximum length of the datagram send queue.
+    ///
+    /// The default is `1000`.
+    pub fn set_dgram_send_max_queue_len(&mut self, v: usize) {
+        self.dgram_send_max_queue_len = v;
+    }
+
+    /// Sets the maximum length of the datagram receive queue.
+    ///
+    /// The default is `1000`.
+    pub fn set_dgram_recv_max_queue_len(&mut self, v: usize) {
+        self.dgram_recv_max_queue_len = v;
     }
 }
 
@@ -1172,8 +1194,11 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
-            dgram_recv_queue: dgram::DatagramQueue::new(),
-            dgram_send_queue: dgram::DatagramQueue::new(),
+            dgram_recv_queue: dgram::DatagramQueue::new(
+                config.dgram_recv_max_queue_len),
+
+            dgram_send_queue: dgram::DatagramQueue::new(
+                config.dgram_send_max_queue_len),
         });
 
         if let Some(odcid) = odcid {
