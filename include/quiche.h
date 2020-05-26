@@ -178,6 +178,12 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 // Enables support for receiving datagram frames.
 void quiche_config_set_dgram_frames_supported(quiche_config *config, bool v);
 
+// Sets the maximum length of the datagram receive queue.
+void quiche_config_set_dgram_recv_max_queue_len(quiche_config *config, size_t v);
+
+// Sets the maximum length of the datagram send queue.
+void quiche_config_set_dgram_send_max_queue_len(quiche_config *config, size_t v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -333,6 +339,18 @@ typedef struct {
 
 // Collects and returns statistics about the connection.
 void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+
+// Reads data from the datagram receive queue.
+ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
+                               size_t buf_len);
+
+// Writes data to the datagram send queue.
+ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
+                               size_t buf_len);
+
+// Iterates over the datagram send queue and purges items matching the predicate.
+void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
+                                      bool (*f)(uint8_t *, size_t));
 
 // Gets the size of the largest Datagram payload that can be sent, or
 // QUICHE_ERR_DONE if datagrams cannot be sent on the current connection.
