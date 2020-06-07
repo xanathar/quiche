@@ -66,6 +66,7 @@ impl DatagramQueue {
             Some(_) => Ok(())
         }
     }
+
     pub fn pop(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.queue.front() {
             Some(d) =>
