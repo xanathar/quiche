@@ -2869,7 +2869,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        Ok(self.dgram_recv_queue.pop(buf)?)
+        self.dgram_recv_queue.pop(buf)
     }
 
     /// Send data in a Datagram frame.
@@ -3563,7 +3563,7 @@ impl Connection {
                 if self.dgram_recv_queue.is_full() {
                     self.dgram_recv_queue.discard_front()?;
                 }
-
+              
                 self.dgram_recv_queue.push(&data)?;
             },
         }
