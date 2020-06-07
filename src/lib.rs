@@ -2969,7 +2969,7 @@ impl Connection {
     pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.dgram_send_queue.purge(f);
     }
-  
+
     /// Gets the size of the largest Datagram frame payload that can be sent,
     /// given the maximum size supported by the peer, the current maximum
     /// packet length and the space required by the transport overhead.
@@ -3607,7 +3607,7 @@ impl Connection {
                 if self.dgram_recv_queue.is_full() {
                     self.dgram_recv_queue.discard_front()?;
                 }
-              
+
                 self.dgram_recv_queue.push(&data)?;
             },
         }
@@ -6292,8 +6292,6 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(10);
-        config.set_dgram_send_max_queue_len(2);
         config.set_max_packet_size(1200);
         config.verify_peer(false);
 
@@ -6338,7 +6336,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_frames_supported(true);
         config.set_dgram_recv_max_queue_len(10);
         config.set_dgram_send_max_queue_len(10);
         config.verify_peer(false);
@@ -6407,13 +6405,45 @@ mod tests {
     fn dgram_send_queue_overflow() {
         let mut buf = [0; 65535];
 
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(b"\x06proto1\x06proto2").unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(10);
+        config.set_dgram_send_max_queue_len(2);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
-        let result = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result, Ok(12));
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(
+            pipe.client.dgram_send(b"hola, mundo"),
+            Err(Error::Done));
 
-        let result = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result, Err(Error::Done));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
     }
 
     #[test]
@@ -6430,7 +6460,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_max_datagram_frame_size(65535);
+        config.set_dgram_frames_supported(true);
         config.set_dgram_recv_max_queue_len(2);
         config.set_dgram_send_max_queue_len(10);
         config.verify_peer(false);
