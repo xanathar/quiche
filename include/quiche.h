@@ -183,6 +183,9 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
+// Enables support for receiving datagram frames.
+void quiche_config_set_dgram_frames_supported(quiche_config *config, bool v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -348,6 +351,10 @@ typedef struct {
 
 // Collects and returns statistics about the connection.
 void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+
+// Gets the size of the largest Datagram payload that can be sent, or
+// QUICHE_ERR_DONE if datagrams cannot be sent on the current connection.
+ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
