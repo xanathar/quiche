@@ -47,7 +47,7 @@ impl DatagramQueue {
     }
 
     pub fn push(&mut self, data: &[u8]) -> Result<()> {
-        if self.queue.len() == self.queue_max_len {
+        if self.is_full() {
             return Err(Error::Done);
         }
 
@@ -60,6 +60,13 @@ impl DatagramQueue {
         self.queue.front().map(|d| d.len())
     }
 
+    pub fn discard_front(&mut self) -> Result<()> {
+        match self.queue.pop_front() {
+            None => Err(Error::InvalidState),
+            Some(_) => Ok(())
+        }
+    }
+  
     pub fn pop(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.queue.front() {
             Some(d) =>
@@ -83,13 +90,16 @@ impl DatagramQueue {
         !self.queue.is_empty()
     }
 
-    pub fn pending_bytes(&self) -> usize {
-        self.queue_bytes_size
-    }
-
     pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.queue.retain(|d| !f(d));
         self.queue_bytes_size = self.queue.iter()
                                 .fold(0, |total, d| total + d.len());
+
+    pub fn is_full(&self) -> bool {
+        self.queue.len() == self.queue_max_len
+    }
+
+    pub fn pending_bytes(&self) -> usize {
+        self.queue_bytes_size
     }
 }

@@ -77,9 +77,6 @@ fn main() {
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
-    let max_datagram_frame = args.get_str("--max-dgram-frame");
-    let max_datagram_frame = u64::from_str_radix(max_datagram_frame, 10).unwrap();
-
     let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16).unwrap();
 
@@ -159,7 +156,7 @@ fn main() {
     config.set_initial_max_streams_bidi(app_params.initial_max_streams_bidi);
     config.set_initial_max_streams_uni(app_params.initial_max_streams_uni);
     config.set_disable_active_migration(true);
-    config.set_max_datagram_frame_size(max_datagram_frame);
+    config.set_dgram_frames_supported(true);
 
     let mut http3_conn = None;
 

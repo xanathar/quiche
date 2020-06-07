@@ -794,23 +794,29 @@ impl Connection {
         &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
     ) -> Result<()> {
         let len = octets::varint_len(flow_id) + buf.len();
-        let dgram_len = super::frame::MAX_DGRAM_OVERHEAD + len;
-
-        if dgram_len > conn.peer_transport_params.max_datagram_frame_size as usize
-        {
-            return Err(Error::BufferTooShort);
-        }
-
         let mut d = vec![0; len as usize];
-
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         b.put_varint(flow_id)?;
         b.put_bytes(buf)?;
 
-        conn.dgram_send_queue.push(&d)?;
+        conn.dgram_send(&d)?;
 
         Ok(())
+    }
+
+    /// Gets the size of the largest Datagram frame payload that can be sent,
+    /// given the maximum size supported by the peer, the current maximum
+    /// packet length and the space required by the HTTP/3 and QUIC overheads.
+    /// https://tools.ietf.org/html/draft-schinazi-quic-h3-datagram-02
+    pub fn dgram_max_writable_len(
+        &self, conn: &super::Connection, flow_id: u64,
+    ) -> Option<usize> {
+        let flow_id_len = octets::varint_len(flow_id);
+        match conn.dgram_max_writable_len() {
+            None => None,
+            Some(len) => len.checked_sub(flow_id_len),
+        }
     }
 
     /// Reads request or response body data into the provided buffer.

@@ -136,7 +136,7 @@ fn main() {
     config.set_initial_max_streams_bidi(max_streams_bidi);
     config.set_initial_max_streams_uni(max_streams_uni);
     config.set_disable_active_migration(true);
-    config.set_max_datagram_frame_size(500);
+    config.set_dgram_frames_supported(true);
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
