@@ -29,9 +29,6 @@ use std::collections::VecDeque;
 use crate::Error;
 use crate::Result;
 
-// The default length for datagram frames queues
-const DEFAULT_DGRAM_QUEUE_SIZE: usize = 1000;
-
 /// Keeps track of Datagram frames.
 #[derive(Default)]
 pub struct DatagramQueue {
@@ -41,11 +38,11 @@ pub struct DatagramQueue {
 }
 
 impl DatagramQueue {
-    pub fn new() -> Self {
+    pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
             queue: VecDeque::new(),
             queue_bytes_size: 0,
-            queue_max_len: DEFAULT_DGRAM_QUEUE_SIZE,
+            queue_max_len,
         }
     }
 
@@ -92,6 +89,11 @@ impl DatagramQueue {
     pub fn has_pending(&self) -> bool {
         !self.queue.is_empty()
     }
+
+    pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
+        self.queue.retain(|d| !f(d));
+        self.queue_bytes_size = self.queue.iter()
+                                .fold(0, |total, d| total + d.len());
 
     pub fn is_full(&self) -> bool {
         self.queue.len() == self.queue_max_len
