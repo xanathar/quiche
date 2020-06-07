@@ -6263,6 +6263,7 @@ mod tests {
         assert_eq!(pipe.server.recovery.app_limited(), false);
     }
   
+    #[test]
     fn dgram_send_fails_invalidstate() {
         let mut buf = [0; 65535];
 
