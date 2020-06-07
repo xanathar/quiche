@@ -6262,7 +6262,6 @@ mod tests {
         // app_limited should be false because we can't send more by cwnd.
         assert_eq!(pipe.server.recovery.app_limited(), false);
     }
-  
     #[test]
     fn dgram_send_fails_invalidstate() {
         let mut buf = [0; 65535];
