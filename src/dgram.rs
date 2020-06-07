@@ -94,6 +94,7 @@ impl DatagramQueue {
         self.queue.retain(|d| !f(d));
         self.queue_bytes_size = self.queue.iter()
                                 .fold(0, |total, d| total + d.len());
+    }
 
     pub fn is_full(&self) -> bool {
         self.queue.len() == self.queue_max_len
