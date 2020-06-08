@@ -6476,14 +6476,14 @@ mod tests {
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(12));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'e');
+        assert_eq!(result1, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
 
         let result2 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'c');
-        assert_eq!(buf[1], b'i');
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'o');
 
         let result3 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result3, Err(Error::Done));
