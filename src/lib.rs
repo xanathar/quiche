@@ -296,7 +296,7 @@ const PAYLOAD_MIN_LEN: usize = 20;
 
 const MAX_AMPLIFICATION_FACTOR: usize = 3;
 
-// The default length of datagram-frames queues if none is specified in config.
+// The default length of datagram queues if not specified by the user in config.
 const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
 
 // The datagram standard recommends either none or 65536 as maximum datagram
