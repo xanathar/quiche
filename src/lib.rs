@@ -2519,6 +2519,12 @@ impl Connection {
             aead,
         )?;
 
+        // Once frames have been serialized they are passed to the Recovery
+        // module which manages retransmission. However, some frames are not
+        // retransmittable and storing them is a waste of resources.
+        // So drop them here.
+        frames.retain(|f| f.retransmittable());
+
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
