@@ -237,6 +237,39 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_dgram_recv_max_queue_len(
+    config: &mut Config, v: size_t
+) {
+    config.set_dgram_recv_max_queue_len(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_dgram_send_max_queue_len(
+    config: &mut Config, v: size_t
+) {
+    config.set_dgram_send_max_queue_len(v);
+}
+
+#[no_mangle]
+#[cfg(all(unix, feature = "qlog"))]
+pub extern fn quiche_conn_set_qlog_fd(
+    conn: &mut Connection, fd: c_int, log_title: *const c_char,
+    log_desc: *const c_char,
+) {
+    let f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let writer = std::io::BufWriter::new(f);
+
+    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
+    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
+
+    conn.set_qlog(
+        std::boxed::Box::new(writer),
+        title.to_string(),
+        format!("{} id={}", description, conn.trace_id),
+    );
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
@@ -747,6 +780,58 @@ pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
 
         Some(v) => v as ssize_t,
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_send(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.dgram_send(buf) {
+        Ok(_) => buf_len as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_recv(
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
+) -> ssize_t {
+
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    let out_len = match conn.dgram_recv(out) {
+        Ok(v) => v,
+
+        Err(e) => return e.to_c(),
+    };
+
+    out_len as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_purge_outgoing(
+    conn: &mut Connection,
+    f: fn(*const u8, size_t) -> bool,
+) {
+    conn.dgram_purge_outgoing(
+        |d:&[u8]| -> bool {
+            let ptr : *const u8 = d.as_ptr();
+            let len : size_t = d.len();
+
+            f(ptr, len)
+        }
+    );
 }
 
 #[no_mangle]

@@ -303,7 +303,7 @@ const MAX_AMPLIFICATION_FACTOR: usize = 3;
 // This represents more or less how many ack blocks can fit in a typical packet.
 const MAX_ACK_RANGES: usize = 68;
 
-// The default length of datagram-frames queues if none is specified in config.
+// The default length of datagram queues if not specified by the user in config.
 const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
 
 // The datagram standard recommends either none or 65536 as maximum datagram
