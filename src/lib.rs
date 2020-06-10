@@ -6775,7 +6775,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.set_dgram_frames_supported(true);
-        config.set_max_packet_size(1200);
+        config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -6916,14 +6916,14 @@ mod tests {
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(11));
-        assert_eq!(buf[0], b'c');
-        assert_eq!(buf[1], b'i');
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
 
         let result2 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'o');
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
 
         let result3 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result3, Err(Error::Done));
@@ -6960,14 +6960,14 @@ mod tests {
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(12));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'e');
+        assert_eq!(result1, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
 
         let result2 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'c');
-        assert_eq!(buf[1], b'i');
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'o');
 
         let result3 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result3, Err(Error::Done));
