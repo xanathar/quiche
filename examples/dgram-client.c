@@ -162,7 +162,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                   (uint8_t *)SIDUCK_ONLY_QUACKS_ECHO_MSG,
                                   SIDUCK_ONLY_QUACKS_ECHO_MSG_LEN);
 
-                fprintf(stderr, "Received datagram which is not quack - closing.\n");
+                fprintf(stderr, "Received datagram which is not quack-ack - closing.\n");
             }
         }
     }
