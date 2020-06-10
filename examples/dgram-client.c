@@ -128,16 +128,6 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             req_sent = true;
         }
 
-        uint64_t s = 0;
-        quiche_stream_iter *readable = quiche_conn_readable(conn_io->conn);
-        if (quiche_stream_iter_next(readable, &s)) {
-            fprintf(stderr, "Received data on a stream - closing.\n");
-            quiche_conn_close(conn_io->conn, true, SIDUCK_ONLY_QUACKS_ECHO,
-                            (uint8_t *)SIDUCK_ONLY_QUACKS_ECHO_MSG,
-                            SIDUCK_ONLY_QUACKS_ECHO_MSG_LEN);
-        }
-        quiche_stream_iter_free(readable);
-
         while(true) {
             ssize_t dgram_len;
             uint8_t dgram_buf[65536];
