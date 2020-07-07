@@ -516,25 +516,6 @@ pub extern fn quiche_conn_set_qlog_path(
 }
 
 #[no_mangle]
-#[cfg(all(unix, feature = "qlog"))]
-pub extern fn quiche_conn_set_qlog_fd(
-    conn: &mut Connection, fd: c_int, log_title: *const c_char,
-    log_desc: *const c_char,
-) {
-    let f = unsafe { std::fs::File::from_raw_fd(fd) };
-    let writer = std::io::BufWriter::new(f);
-
-    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
-    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
-
-    conn.set_qlog(
-        Box::new(writer),
-        title.to_string(),
-        format!("{} id={}", description, conn.trace_id),
-    );
-}
-
-#[no_mangle]
 pub extern fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t,
 ) -> ssize_t {
