@@ -725,6 +725,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
+            "nocc" => Ok(CongestionControlAlgorithm::NoCC),
 
             _ => Err(crate::Error::CongestionControl),
         }
