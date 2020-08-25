@@ -252,6 +252,15 @@ pub extern fn quiche_config_set_dgram_send_max_queue_len(
     config.set_dgram_send_max_queue_len(v);
 }
 
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_config_enable_dgram_ignore_cc(
+    config: &mut Config, v: bool,
+) {
+    config.enable_dgram_ignore_cc(v)
+}
+
 #[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
