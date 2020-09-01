@@ -192,6 +192,9 @@ void quiche_config_set_dgram_recv_max_queue_len(quiche_config *config, size_t v)
 // Sets the maximum length of the DATAGRAM send queue.
 void quiche_config_set_dgram_send_max_queue_len(quiche_config *config, size_t v);
 
+// Configure whether DATAGRAMS should ignore congestion control or not.
+void quiche_config_enable_dgram_ignore_cc(quiche_config *config, bool v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
