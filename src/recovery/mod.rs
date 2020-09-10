@@ -733,6 +733,8 @@ pub enum CongestionControlAlgorithm {
     Reno  = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
     CUBIC = 1,
+    /// NoCC
+    NoCC = 2,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -745,6 +747,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
+            "nocc" => Ok(CongestionControlAlgorithm::NoCC),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -772,6 +775,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
+            CongestionControlAlgorithm::NoCC => &nocc::NoCC,
         }
     }
 }
@@ -1374,3 +1378,4 @@ mod cubic;
 mod delivery_rate;
 mod hystart;
 mod reno;
+mod nocc;

@@ -464,7 +464,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
-            cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            cc_algorithm: CongestionControlAlgorithm::NoCC,
             hystart: true,
 
             #[cfg(feature = "quic-dgram")]
