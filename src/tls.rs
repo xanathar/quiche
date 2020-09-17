@@ -485,11 +485,13 @@ impl Handshake {
 
             let x509 = SSL_get_peer_certificate(self.as_ptr());
             if x509.is_null() {
+                warn!("X509 CERT IS NULL!!");
                 return None;
             }
 
             let out_len = i2d_X509(x509, &mut out);
             if out_len <= 0 {
+                warn!("X509 LEN IS {}", out_len);
                 return None;
             }
 
