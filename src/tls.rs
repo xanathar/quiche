@@ -480,6 +480,7 @@ impl Handshake {
     }
 
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
+        warn!("Entering peer_cert");
         let peer_cert = unsafe {
             let mut out: *mut libc::c_uchar = ptr::null_mut();
 
@@ -502,6 +503,7 @@ impl Handshake {
 
             der
         };
+        warn!("Exiting peer_cert");
 
         Some(peer_cert)
     }
